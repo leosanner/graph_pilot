@@ -8,7 +8,7 @@ class PostgresConfig(BaseSettings):
     env_prefix="DATABASE_"
   )
 
-class Pool:
+class Database:
   def __init__(self, config: PostgresConfig):
     self.pool = ConnectionPool(conninfo=config.url)
 
