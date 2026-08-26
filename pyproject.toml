@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ragp1 = "v1.cmd.main:main"
+ragp1 = "v1.main:main"
 
 [build-system]
 requires = ["hatchling"]
