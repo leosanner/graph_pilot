@@ -2,7 +2,18 @@
 
 import typer
 
-app = typer.Typer(no_args_is_help=True, help="RAG p1 — ingest and query")
+from v1.tui.app import run as run_tui
+
+app = typer.Typer(
+    no_args_is_help=False,
+    help="LazyDocs — local RAG from the terminal",
+)
+
+
+@app.callback(invoke_without_command=True)
+def default(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        run_tui()
 
 
 @app.command()
