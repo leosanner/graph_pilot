@@ -1,0 +1,17 @@
+{
+  "purpose": "Tokenize each sample with the target model, then chars_per_token = mean(len(text) / n_tokens).",
+  "samples": [
+    {
+      "id": "prose",
+      "text": "A retrieval pipeline is only as useful as the chunks it stores. When a long report is split without care, a sentence that carries the actual claim can land in one chunk while the evidence that supports it lands in the next. The reader of the answer never sees that break, but the embedding does: each vector describes a fragment, not the argument. Overlap exists to keep a little of the previous fragment in the next one, so a query about the claim still finds the evidence nearby. That is why chunk size is not a taste setting. It is a bet about how much context a single vector can hold before the signal thins out."
+    },
+    {
+      "id": "list",
+      "text": "Ingestion checklist:\n- Load the source document and keep its original path in metadata.\n- Split on characters, not tokens, then record the splitter settings on every chunk.\n- Embed in small batches so a single timeout does not drop the whole file.\n- Store position as a contiguous index from zero, even across batches.\n- Reject the document if the provider returns fewer vectors than texts.\n- Persist model name, embedding dimension, and processing time next to the chunks.\nFollow the list in order. Skipping the metadata step makes later debugging guesswork."
+    },
+    {
+      "id": "punctuation",
+      "text": "See Smith et al. (2024), p. 12–14: “nomic-embed-text” reports 2,048 tokens / 768-d; bge-m3 reports 8,192 / 1,024-d. Typical RAG budgets are 256–512 tokens/chunk (≈10–20% overlap), e.g. 512 * 4.2 chars/token ≈ 2,150 chars. Watch CLS/SEP on BERT-like models; short strings (Dr., U.S., 3.14, Q3’26) inflate the ratio. If embed(prefix) ≈ embed(prefix + noise), the model is truncating—don’t treat that as a valid window. Refs: RFC-like ids (DOC-001, DOC-002), dates 2026-08-27, and paths like src/v1/app/ingestion/vector/utils.py."
+    }
+  ]
+}

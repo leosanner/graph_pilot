@@ -1,14 +1,33 @@
 from dataclasses import dataclass
 from typing import Any, Mapping
 import ollama
+import json
 from v1.app.ingestion.vector.errors import ModelInfoError
+from pathlib import Path
+
+DIR = Path(__file__).parent
+CALIBRATION_FILE = "calibration_texts.json"
+
 
 @dataclass
 class ModelMetadata:
-  model_name: str
   context_length: int
   embedding_dim: int
   capabilites: list[str]
+
+
+@dataclass
+class ModelSpecs:
+  metadata: ModelMetadata
+  model_name: str
+  char_per_token:float
+
+
+def load_calibration_data() -> list[str]:
+  with open(DIR/CALIBRATION_FILE, "r", encoding="utf-8") as file:
+    return [
+      sample["text"] for sample in json.load(file)["samples"]
+    ]
 
 
 def _int_by_suffix(model_info: Mapping[str, Any], suffix: str) -> int | None:
@@ -18,7 +37,7 @@ def _int_by_suffix(model_info: Mapping[str, Any], suffix: str) -> int | None:
   return None
 
 
-def load_model_information(model_name: str) -> ModelMetadata:
+def load_model_metadata(model_name: str) -> ModelMetadata:
   try:
     response = ollama.show(model_name)
   except Exception as e:
@@ -35,8 +54,36 @@ def load_model_information(model_name: str) -> ModelMetadata:
     )
 
   return ModelMetadata(
-    model_name=model_name,
     context_length=context_length,
     embedding_dim=embedding_dim,
     capabilites= capabilities
   )
+
+
+def load_model_chunking_specs(model_name:str) -> float:
+  char_per_token = 0
+  calibration_data = load_calibration_data()
+
+  for sample_text in calibration_data:
+    response = ollama.embed(
+      model=model_name,
+      input=sample_text
+    )
+
+    char_per_token += (len(sample_text)/(response.prompt_eval_count * len(calibration_data)))
+
+  return char_per_token
+
+
+def load_model_specs(model_name:str) -> ModelSpecs:
+  model_metadata = load_model_metadata(model_name)
+  char_per_token = load_model_chunking_specs(model_name)
+
+  return ModelSpecs(
+    metadata=model_metadata,
+    model_name=model_name,
+    char_per_token=char_per_token
+  )
+
+if __name__ == "__main__":
+  print(load_model_specs("nomic-embed-text:latest"))
