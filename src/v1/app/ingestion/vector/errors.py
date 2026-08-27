@@ -1,2 +1,6 @@
 class EmbeddingError(Exception):
   ...
+
+class ModelInfoError(Exception):
+  ...
+
