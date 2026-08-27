@@ -27,7 +27,7 @@ def load_model_information(model_name: str) -> ModelMetadata:
   model_info = response.modelinfo or {}
   context_length = _int_by_suffix(model_info, ".context_length")
   embedding_dim = _int_by_suffix(model_info, ".embedding_length")
-  capabilities = getattr(response, "capabilities", None) or []
+  capabilities = getattr(response, "capabilities", [])
 
   if context_length is None or embedding_dim is None:
     raise ModelInfoError(
