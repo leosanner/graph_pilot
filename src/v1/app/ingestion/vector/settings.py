@@ -6,6 +6,7 @@ class VectorSettings:
   chunk_size: int
   chunk_overlap: int
   model: Embeddings
+  model_name: str
 
 @dataclass
 class RuntimeSettings:

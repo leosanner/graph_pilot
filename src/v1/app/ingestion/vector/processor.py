@@ -6,7 +6,7 @@ from v1.app.ingestion.vector.settings import VectorSettings, RuntimeSettings
 from v1.app.ingestion.vector.schemas import ProcessedDocument, Chunk
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-class Processor:
+class VectorProcessor:
   def __init__(self, settings:VectorSettings, runtime_settings:RuntimeSettings):
     self.splitter = RecursiveCharacterTextSplitter(
       chunk_size = settings.chunk_size,
@@ -14,6 +14,7 @@ class Processor:
     )
     self.embeddings = settings.model
     self.runtime = runtime_settings
+    self.model_name = settings.model_name
     self.semaphore = asyncio.Semaphore(runtime_settings.max_concurrent_batches)
 
 
@@ -35,14 +36,14 @@ class Processor:
 
     except Exception as e:
       source = document.metadata.get("source", "<no_source>")
-      raise EmbeddingError(f"Document {source} not processed")
+      raise EmbeddingError(f"Document {source} not processed\n error: {e}")
 
     results = [chunk for task in tasks for chunk in task.result()]
 
     metadata = {
       "chunks_count": len(chunks),
       "time_to_process": time.perf_counter() - start,
-      "model": self.embeddings.model,
+      "model": self.model_name,
       "splitter": {
         "chunk_size": self.splitter._chunk_size,
         "chunk_overlap": self.splitter._chunk_overlap,
@@ -67,15 +68,15 @@ class Processor:
   async def embed_with_retry(self, texts: list[str]) -> list[list[float]]:
     delay = self.runtime.retry_base_delay
 
-    for attempt in range(0, self.runtime.max_attempts + 1):
+    for attempt in range(0, self.runtime.max_attempts):
       try:
         async with self.semaphore:
           async with asyncio.timeout(self.runtime.request_timeout):
             vectors = await self.embeddings.aembed_documents(texts)
 
       except Exception as e:
-        if attempt == self.runtime.max_attempts:
-          raise EmbeddingError(f"Batch of {len(texts)} chunks failed in {attempt} tries")
+        if attempt == self.runtime.max_attempts - 1:
+          raise EmbeddingError(f"Batch of {len(texts)} chunks failed in {attempt + 1} tries")
         await asyncio.sleep(delay)
         delay *= 2
         continue
