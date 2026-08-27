@@ -6,7 +6,7 @@ from v1.app.ingestion.vector.settings import VectorSettings, RuntimeSettings
 from v1.app.ingestion.vector.schemas import ProcessedDocument, Chunk
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-class VectorProcessor:
+class Processor:
   def __init__(self, settings:VectorSettings, runtime_settings:RuntimeSettings):
     self.splitter = RecursiveCharacterTextSplitter(
       chunk_size = settings.chunk_size,
