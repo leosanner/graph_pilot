@@ -57,13 +57,30 @@ class VectorProcessor:
 
   async def process_batch(self, offset:int, batch:list[Document]) -> list[Chunk]:
     texts = [document.page_content for document in batch]
-    async with self.semaphore:
-      vectors = await self.embeddings.aembed_documents(texts)
-
-    if len(vectors) != len(texts):
-      raise EmbeddingError(f"Expected {len(texts)}, received {len(vectors)}")
+    vectors = await self.embed_with_retry(texts)
 
     return [
       Chunk(embedding=v, position= offset + i, content= texts[i])
       for i, v in enumerate(vectors)
     ]
+
+  async def embed_with_retry(self, texts: list[str]) -> list[list[float]]:
+    delay = self.runtime.retry_base_delay
+
+    for attempt in range(0, self.runtime.max_attempts + 1):
+      try:
+        async with self.semaphore:
+          async with asyncio.timeout(self.runtime.request_timeout):
+            vectors = await self.embeddings.aembed_documents(texts)
+
+      except Exception as e:
+        if attempt == self.runtime.max_attempts:
+          raise EmbeddingError(f"Batch of {len(texts)} chunks failed in {attempt} tries")
+        await asyncio.sleep(delay)
+        delay *= 2
+        continue
+
+      if len(vectors) != len(texts):
+        raise EmbeddingError(f"Expected {len(texts)}, received {len(vectors)}")
+
+      return vectors
