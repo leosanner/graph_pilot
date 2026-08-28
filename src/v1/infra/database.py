@@ -1,3 +1,4 @@
+from pgvector.psycopg import register_vector
 from psycopg_pool import ConnectionPool
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,7 +16,8 @@ class PostgresClient:
       self.pool = ConnectionPool(
          conninfo = config.url,
          min_size = config.min_connections,
-         max_size = config.max_connections
+         max_size = config.max_connections,
+         configure= register_vector
       )
 
   def connection(self):
