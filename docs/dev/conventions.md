@@ -26,6 +26,7 @@ Paths below are relative to the repository root.
 | `src/v1/app/ingestion/vector/` | Chunking, embedding, model metadata probe. |
 | `src/v1/app/agent/` | Chat model wiring and RAG stubs. |
 | `src/v1/infra/` | Postgres client. |
+| `scripts/` | `up.sh` — one-command local bootstrap. |
 | `tests/` | Pytest. |
 | `docs/` | This documentation. |
 

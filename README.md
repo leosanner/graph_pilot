@@ -23,7 +23,9 @@ How the pieces work: [`docs/README.md`](docs/README.md).
 make up
 ```
 
-That copies `.env` if it is missing, installs deps, starts Postgres, applies migrations, pulls the embed model, and opens the TUI. Choose **Ingest**, pick the model, then enter a UTF-8 text file path.
+That copies `.env` if it is missing, installs deps, starts Postgres, applies migrations, pulls the embed model, and opens the TUI. How that pipeline works: [`docs/dev/project-up.md`](docs/dev/project-up.md).
+
+Choose **Ingest**, pick the model, then enter a UTF-8 text file path.
 
 CLI, after the stack is up:
 

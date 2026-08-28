@@ -7,3 +7,4 @@ How the code works today. Each module doc has the same shape: **why it exists**,
 | Ollama model probe | [`dev/model-metadata.md`](./dev/model-metadata.md) |
 | Split + embed | [`dev/vector-processor.md`](./dev/vector-processor.md) |
 | Chunk HNSW index | [`dev/chunk-index.md`](./dev/chunk-index.md) |
+| Project up | [`dev/project-up.md`](./dev/project-up.md) |
