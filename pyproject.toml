@@ -1,7 +1,7 @@
 [project]
 name = "p1-ct-test"
 version = "0.1.0"
-description = "Add your description here"
+description = "LazyDocs — local RAG from the terminal"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

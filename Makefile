@@ -1,11 +1,14 @@
-include .env
+-include .env
 export
 
 # yoyo maps the `postgresql://` scheme to psycopg2; this project ships psycopg3
 # only, so migrations run through the `postgresql+psycopg://` scheme.
 YOYO_DATABASE_URL := postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)
 
-.PHONY: db-up db-down db-reset db-logs db-shell migrate rollback
+.PHONY: up db-up db-down db-reset db-logs db-shell migrate rollback
+
+up:
+	./scripts/up.sh
 
 db-up:
 	docker compose up -d postgres
