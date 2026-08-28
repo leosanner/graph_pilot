@@ -41,7 +41,7 @@ class VectorProcessor:
 
     except Exception as e:
       source = document.metadata.get("source", "<no_source>")
-      raise EmbeddingError(f"Document {source} not processed\n error: {e}")
+      raise EmbeddingError(f"Document {source} not processed") from e
 
     results = [chunk for task in tasks for chunk in task.result()]
 
@@ -81,7 +81,7 @@ class VectorProcessor:
 
       except Exception as e:
         if attempt == self.runtime.max_attempts - 1:
-          raise EmbeddingError(f"Batch of {len(texts)} chunks failed in {attempt + 1} tries")
+          raise EmbeddingError(f"Batch of {len(texts)} chunks failed in {attempt + 1} tries") from e
         await asyncio.sleep(delay)
         delay *= 2
         continue
