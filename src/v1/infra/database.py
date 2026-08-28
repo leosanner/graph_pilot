@@ -8,7 +8,9 @@ class PostgresSettings(BaseSettings):
   max_connections: int = 10
 
   model_config = SettingsConfigDict(
-    env_prefix="DATABASE_"
+    env_prefix="DATABASE_",
+    env_file=".env",
+    extra="ignore",
   )
 
 class PostgresClient:
