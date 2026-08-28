@@ -11,7 +11,7 @@ INSERT_VECTOR_QUERY = """
 
 
 INSERT_DOCUMENT_QUERY = """
-    INSERT INTO documents (id, name, created_at, updated_at),
+    INSERT INTO documents (id, name, created_at, updated_at)
     VALUES (%s, %s, %s, %s)
 """
 
@@ -23,19 +23,19 @@ def utc_now() -> datetime:
 
 @dataclass
 class ChunkEntity:
-  id: UUID = field(default_factory=uuid4)
   document_id: UUID
   content: str
   position: int
   embedding: list[float]
+  id: UUID = field(default_factory=uuid4)
   metadata: dict[str, Json] = field(default_factory=dict)
 
 @dataclass
 class DocumentEntity:
-  id: UUID = field(default_factory=uuid4)
   name: str
-  updated_at: datetime = field(default_factory=utc_now)
-  created_at: datetime = None
+  id: UUID = field(default_factory=uuid4)
+  updated_at: datetime | None = None
+  created_at: datetime = field(default_factory=utc_now)
 
 
 class VectorRepository:
@@ -58,5 +58,5 @@ class VectorRepository:
       with conn.cursor() as cursor:
         cursor.execute(
           INSERT_DOCUMENT_QUERY,
-          document.id, document.name, document.created_at, document.updated_at
+          (document.id, document.name, document.created_at, document.updated_at)
         )
