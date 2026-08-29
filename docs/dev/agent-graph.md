@@ -34,26 +34,6 @@ Small talk never visits `tools`. A retry after zero hits is a second lap around 
 
 The figures below are the **compiled** graph, from `graph.get_graph()` — the same object `build_graph` returns. Dotted edges are conditional (`tools_condition`). Solid edges always fire.
 
-![Compiled agent graph](agent-graph.png)
-
-```text
-        +-----------+
-        | __start__ |
-        +-----------+
-               *
-               *
-               *
-          +-------+
-          | model |
-          +-------+.
-          .         .
-        ..           ..
-       .               .
-+---------+         +-------+
-| __end__ |         | tools |
-+---------+         +-------+
-```
-
 ```mermaid
 ---
 config:
