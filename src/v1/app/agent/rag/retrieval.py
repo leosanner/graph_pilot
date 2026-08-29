@@ -1,7 +1,16 @@
+from v1.infra.database import PostgresClient
+from dataclasses import dataclass
 
 
-def vector_search():
-  pass
+@dataclass
+class VectorSearch:
+  embedding: list[float]
+  top_k: int = 5
 
-def graph_search():
-  pass
+
+class Retrieval:
+  def __init__(self, client: PostgresClient):
+    self.client = client
+
+  def vector_search(self, search:VectorSearch):
+    pass
