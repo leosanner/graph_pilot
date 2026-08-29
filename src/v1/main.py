@@ -11,13 +11,15 @@ from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 
 from v1.app.ingestion.ingestion import DocumentIngestion
+from v1.app.ingestion.loader.pdf_loader import PdfLoader
 from v1.app.ingestion.repository.vector import VectorRepository
 from v1.app.ingestion.vector.errors import EmbeddingError, ModelInfoError
 from v1.app.ingestion.vector.processor import VectorProcessor
 from v1.app.ingestion.vector.settings import RuntimeSettings, VectorSettings
 from v1.app.ingestion.vector.utils.utils import load_model_metadata
 from v1.infra.database import PostgresClient, PostgresSettings
-from v1.tui.app import Action, run as run_tui
+from v1.tui.app import run as run_tui
+from v1.tui.paths import FILE_TYPE
 
 app = typer.Typer(
     no_args_is_help=False,
@@ -28,16 +30,12 @@ app = typer.Typer(
 def document_from_path(path: Path) -> Document:
     if not path.is_file():
         raise typer.BadParameter(f"Not a file: {path}")
+    if path.suffix.lower() != f".{FILE_TYPE}":
+        raise typer.BadParameter(f"{path} is not a .{FILE_TYPE} file")
     try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise typer.BadParameter(
-            f"{path} is not UTF-8 text. PDF loading is not wired yet."
-        ) from exc
-    return Document(
-        page_content=text,
-        metadata={"source": str(path), "name": path.name},
-    )
+        return PdfLoader().load(path)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def vector_processor(model_name: str) -> VectorProcessor:
@@ -70,10 +68,14 @@ async def ingest_document(document: Document, model_name: str) -> None:
         client.close()
 
 
-def run_ingest(path: Path, model_name: str) -> None:
+def ingest_path(path: Path, model_name: str) -> None:
     document = document_from_path(path)
+    asyncio.run(ingest_document(document, model_name))
+
+
+def run_ingest(path: Path, model_name: str) -> None:
     try:
-        asyncio.run(ingest_document(document, model_name))
+        ingest_path(path, model_name)
     except (EmbeddingError, ModelInfoError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -92,15 +94,9 @@ def default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
-    selection = run_tui()
+    selection = run_tui(ingest=_tui_ingest)
     if selection is None:
         raise typer.Exit(code=0)
-
-    if selection.action == Action.INGEST:
-        if not selection.path:
-            raise typer.Exit(code=1)
-        run_ingest(Path(selection.path), selection.model)
-        return
 
     typer.echo(f"query {selection.model}")
 
@@ -116,6 +112,10 @@ def ingest(
 @app.command()
 def query(question: str) -> None:
     typer.echo(f"query {question!r}")
+
+
+def _tui_ingest(path: str, model: str) -> None:
+    ingest_path(Path(path), model)
 
 
 def main() -> None:

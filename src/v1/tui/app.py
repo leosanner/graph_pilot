@@ -39,7 +39,7 @@ from v1.tui.models import (
     models_for_role,
 )
 from v1.tui.paths import (
-    FILE_TYPES,
+    FILE_TYPE,
     BrowseEntry,
     BrowseKind,
     format_dir,
@@ -55,9 +55,9 @@ class Step(StrEnum):
     LOADING = "loading"
     PICK_MODEL = "pick_model"
     PICK_DIR = "pick_dir"
-    PICK_TYPE = "pick_type"
     PICK_FILE = "pick_file"
     READY = "ready"
+    INGESTING = "ingesting"
     ERROR = "error"
     DONE = "done"
     QUIT = "quit"
@@ -96,6 +96,12 @@ class Selection:
     path: str | None = None
 
 
+@dataclass(frozen=True)
+class Notice:
+    ok: bool
+    message: str
+
+
 @dataclass
 class AppState:
     step: Step = Step.HOME
@@ -113,14 +119,15 @@ class AppState:
     browse_entries: list[BrowseEntry] = field(default_factory=list)
     browse_cursor: int = 0
     browse_err: str = ""
-    file_type_cursor: int = 0
-    selected_type: str = ""
+    selected_type: str = FILE_TYPE
     files: list[str] = field(default_factory=list)
     files_cursor: int = 0
     files_err: str = ""
     selected_file: str = ""
     list_entries: Callable[[Path], list[BrowseEntry]] = list_browse_entries
     list_files: Callable[[Path, str], list[str]] = list_files_by_type
+    ingest: Callable[[str, str], None] | None = None
+    notice: Notice | None = None
 
     def current_option(self) -> ActionOption:
         return ACTION_OPTIONS[self.action_cursor]
@@ -189,10 +196,8 @@ class AppState:
                 self.step = Step.HOME
             elif self.step == Step.PICK_DIR:
                 self.step = Step.PICK_MODEL
-            elif self.step == Step.PICK_TYPE:
-                self.step = Step.PICK_DIR
             elif self.step == Step.PICK_FILE:
-                self.step = Step.PICK_TYPE
+                self.step = Step.PICK_DIR
             elif self.step == Step.READY:
                 self.step = (
                     Step.PICK_FILE if self.action == Action.INGEST else Step.PICK_MODEL
@@ -218,15 +223,14 @@ class AppState:
             self._handle_browse(key)
             return
 
-        if self.step == Step.PICK_TYPE:
-            self._handle_file_type(key)
-            return
-
         if self.step == Step.PICK_FILE:
             self._handle_files(key)
             return
 
         if self.step == Step.READY and key == "enter":
+            if self.action == Action.INGEST:
+                self.step = Step.INGESTING
+                return
             self.step = Step.DONE
 
     def _prepare_picker(self) -> None:
@@ -280,23 +284,11 @@ class AppState:
             return
         entry = self.browse_entries[self.browse_cursor]
         if entry.kind == BrowseKind.USE_CURRENT:
-            self.file_type_cursor = 0
-            self.step = Step.PICK_TYPE
+            self.selected_type = FILE_TYPE
+            self._load_files()
+            self.step = Step.PICK_FILE
             return
         self._load_browse(entry.path)
-
-    def _handle_file_type(self, key: str) -> None:
-        if key in {"up", "k"}:
-            self._nudge("file_type_cursor", len(FILE_TYPES), -1)
-            return
-        if key in {"down", "j"}:
-            self._nudge("file_type_cursor", len(FILE_TYPES), 1)
-            return
-        if key != "enter":
-            return
-        self.selected_type = FILE_TYPES[self.file_type_cursor]
-        self._load_files()
-        self.step = Step.PICK_FILE
 
     def _handle_files(self, key: str) -> None:
         if key in {"up", "k"}:
@@ -325,6 +317,27 @@ class AppState:
                 path=self.selected_file,
             )
         return Selection(action=self.action, model=model.name)
+
+    def finish_ingest(self) -> None:
+        selection = self.selection()
+        if selection is None or not selection.path:
+            self._go_home(ok=False, message="Nothing to ingest.")
+            return
+        if self.ingest is None:
+            self._go_home(ok=False, message="Ingest is not configured.")
+            return
+        try:
+            self.ingest(selection.path, selection.model)
+        except Exception as exc:
+            self._go_home(ok=False, message=str(exc) or type(exc).__name__)
+            return
+        self._go_home(ok=True, message=f"Ingested {Path(selection.path).name}")
+
+    def _go_home(self, *, ok: bool, message: str) -> None:
+        self.notice = Notice(ok=ok, message=message)
+        self.action = None
+        self.selected_file = ""
+        self.step = Step.HOME
 
 
 def preferred_from_env() -> tuple[str, str]:
@@ -514,6 +527,9 @@ def render(state: AppState, width: int, height: int) -> Group:
     if state.step == Step.LOADING:
         parts.append(_section("Ollama", "Contacting the local server…"))
         parts.append(_help("q quit"))
+    elif state.step == Step.INGESTING:
+        parts.append(_section("Ingest", "Chunking, embedding, and storing the index…"))
+        parts.append(_help("please wait"))
     elif state.step == Step.ERROR:
         parts.append(_error_body(state))
         parts.append(_help("r/enter retry  •  esc home  •  q quit"))
@@ -523,15 +539,15 @@ def render(state: AppState, width: int, height: int) -> Group:
     elif state.step == Step.PICK_DIR:
         parts.append(_dir_picker(state, height))
         parts.append(_help("↑↓ move  •  enter open/use  •  esc back  •  q quit"))
-    elif state.step == Step.PICK_TYPE:
-        parts.append(_type_picker(state))
-        parts.append(_help("↑↓ move  •  enter select  •  esc back  •  q quit"))
     elif state.step == Step.PICK_FILE:
         parts.append(_file_picker(state, height))
         parts.append(_help("↑↓ move  •  enter select  •  esc back  •  q quit"))
     elif state.step == Step.READY:
         parts.append(_ready_body(state))
-        parts.append(_help("enter continue  •  esc back  •  q quit"))
+        if state.action == Action.INGEST:
+            parts.append(_help("enter ingest  •  esc back  •  q quit"))
+        else:
+            parts.append(_help("enter continue  •  esc back  •  q quit"))
 
     return Group(*parts)
 
@@ -546,10 +562,25 @@ def _render_home(state: AppState, width: int) -> Group:
             _action_card(option, selected=index == state.action_cursor, width=card_width)
         )
 
+    heading: list = []
+    if state.notice is not None:
+        mark = "✓  " if state.notice.ok else "✗  "
+        style = f"bold {GREEN}" if state.notice.ok else f"bold {RED}"
+        heading.extend(
+            [
+                Text(mark + state.notice.message, style=style),
+                Text(""),
+            ]
+        )
+    heading.extend(
+        [
+            Text("What do you want to do?", style=f"bold {CYAN}"),
+            Text("Pick a path. The model comes next.", style=MUTED),
+            Text(""),
+        ]
+    )
     menu = Group(
-        Text("What do you want to do?", style=f"bold {CYAN}"),
-        Text("Pick a path. The model comes next.", style=MUTED),
-        Text(""),
+        *heading,
         *cards,
         Text(""),
         Text("↑↓ move  •  enter open  •  q quit", style=MUTED),
@@ -649,7 +680,7 @@ def _model_row(model: LocalModel, *, selected: bool) -> Text:
 
 def _dir_picker(state: AppState, height: int) -> Padding:
     title = "Folder"
-    hint = "Navigate to the folder that holds the documents."
+    hint = "Navigate to the folder that holds the PDFs."
     if state.browse_err:
         return _picker_screen(
             title,
@@ -694,23 +725,10 @@ def _browse_row(entry: BrowseEntry, *, selected: bool) -> Text:
     return _picker_row(f"{entry.name}/", selected=selected, tone="dir")
 
 
-def _type_picker(state: AppState) -> Padding:
-    list_rows = [
-        _choice_row(file_type.upper(), selected=index == state.file_type_cursor)
-        for index, file_type in enumerate(FILE_TYPES)
-    ]
-    return _picker_screen(
-        "File type",
-        "Only UTF-8 text is ingestible today.",
-        list_rows,
-        folder=state.browse_dir,
-    )
-
-
 def _file_picker(state: AppState, height: int) -> Padding:
-    kind = state.selected_type.upper() or "TXT"
+    kind = state.selected_type.upper() or FILE_TYPE.upper()
     title = f"{kind} files"
-    hint = "Pick the document to chunk and index."
+    hint = "Pick the PDF to chunk and index."
     if state.files_err:
         return _picker_screen(
             title,
@@ -720,7 +738,7 @@ def _file_picker(state: AppState, height: int) -> Padding:
         )
     items = state.files
     if not items:
-        suffix = state.selected_type or "txt"
+        suffix = state.selected_type or FILE_TYPE
         return _picker_screen(
             title,
             hint,
@@ -767,7 +785,11 @@ def _ready_body(state: AppState) -> Padding:
     return Padding(Group(*lines), (1, 2))
 
 
-def run(console: Console | None = None) -> Selection | None:
+def run(
+    console: Console | None = None,
+    *,
+    ingest: Callable[[str, str], None] | None = None,
+) -> Selection | None:
     console = console or Console()
     if not console.is_terminal or not sys.stdin.isatty():
         console.print("LazyDocs needs an interactive terminal.", style=f"bold {RED}")
@@ -777,6 +799,7 @@ def run(console: Console | None = None) -> Selection | None:
     state = AppState(
         preferred_embed=preferred_embed,
         preferred_chat=preferred_chat,
+        ingest=ingest,
     )
 
     with console.screen() as screen:
@@ -784,6 +807,9 @@ def run(console: Console | None = None) -> Selection | None:
             screen.update(render(state, console.size.width, console.size.height))
             if state.step == Step.LOADING:
                 state.load()
+                continue
+            if state.step == Step.INGESTING:
+                state.finish_ingest()
                 continue
             state.handle(read_key())
 

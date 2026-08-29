@@ -25,14 +25,15 @@ def test_list_browse_entries_skips_hidden_dirs_and_files(tmp_path: Path):
 
 
 def test_list_files_by_type_is_case_insensitive_and_sorted(tmp_path: Path):
-    (tmp_path / "b.md").write_text("b")
-    (tmp_path / "A.TXT").write_text("a")
-    (tmp_path / "skip.pdf").write_text("no")
+    (tmp_path / "b.PDF").write_bytes(b"%PDF-1.4")
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "skip.txt").write_text("no")
+    (tmp_path / "notes.md").write_text("md")
     (tmp_path / "nested").mkdir()
 
-    assert list_files_by_type(tmp_path, "txt") == ["A.TXT"]
-    assert list_files_by_type(tmp_path, "md") == ["b.md"]
-    assert "skip.pdf" not in list_files_by_type(tmp_path, "txt")
+    assert list_files_by_type(tmp_path, "pdf") == ["a.pdf", "b.PDF"]
+    assert "skip.txt" not in list_files_by_type(tmp_path, "pdf")
+    assert "notes.md" not in list_files_by_type(tmp_path, "pdf")
 
 
 def test_format_dir_uses_home_tilde(tmp_path: Path, monkeypatch):

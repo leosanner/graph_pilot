@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-FILE_TYPES = ("txt", "md")
+FILE_TYPE = "pdf"
 
 
 class BrowseKind(StrEnum):

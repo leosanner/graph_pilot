@@ -6,12 +6,12 @@ This is a learning project: the ingest path is wired end to end. Chat and query 
 
 ## What it does today
 
-- Split a UTF-8 text file, embed batches with Ollama, persist document + chunk rows
-- Terminal UI (`ragp1`) to choose **Ingest**, the embedding model, then a folder and file
-- CLI: `ragp1 ingest path/to/file.txt`
+- Split a PDF, embed batches with Ollama, persist document + chunk rows
+- Terminal UI (`ragp1`) to choose **Ingest**, the embedding model, then a folder and PDF
+- CLI: `ragp1 ingest path/to/file.pdf`
 - HNSW index on chunk embeddings (cosine) for the retrieval step that is not wired yet
 
-PDF loading is not wired. Files must be UTF-8 text. The default embed model is `nomic-embed-text` (768-d); another dimension needs a new migration.
+The TUI lists only `.pdf` files — that is the format the loader supports. The default embed model is `nomic-embed-text` (768-d); another dimension needs a new migration.
 
 How the pieces work: [`docs/README.md`](docs/README.md).
 
@@ -25,13 +25,13 @@ make up
 
 That copies `.env` if it is missing, installs deps, starts Postgres, applies migrations, pulls the embed model, and opens the TUI. How that pipeline works: [`docs/dev/project-up.md`](docs/dev/project-up.md).
 
-Choose **Ingest**, pick the model, then browse to a UTF-8 `.txt` or `.md` file.
+Choose **Ingest**, pick the model, then browse to a `.pdf` file.
 
 CLI, after the stack is up:
 
 ```bash
-uv run ragp1 ingest path/to/notes.txt
-uv run ragp1 ingest path/to/notes.txt --model nomic-embed-text
+uv run ragp1 ingest path/to/notes.pdf
+uv run ragp1 ingest path/to/notes.pdf --model nomic-embed-text
 ```
 
 `--model` overrides `OLLAMA_EMBED_MODEL` from `.env`.

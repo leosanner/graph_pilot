@@ -26,7 +26,7 @@ flowchart LR
 
 `make up` only runs `scripts/up.sh`. The script `cd`s to the repo root, checks `uv`, `docker`, and `ollama`, copies `.env.example` when `.env` is missing, then sources it. `ollama list` must succeed before anything else. Postgres uses `docker compose up -d --wait` so migrate does not race the healthcheck. Yoyo uses `postgresql+psycopg://` because the project has psycopg3 only. The embed model is `OLLAMA_EMBED_MODEL` (default `nomic-embed-text`). `exec uv run ragp1` replaces the script with the TUI.
 
-After the stack is up, ingest is a separate command: `uv run ragp1 ingest path/to/notes.txt`. `make db-down` stops Postgres; it does not remove `.venv` or the pulled model.
+After the stack is up, ingest is a separate command: `uv run ragp1 ingest path/to/notes.pdf`. `make db-down` stops Postgres; it does not remove `.venv` or the pulled model.
 
 ## Example
 

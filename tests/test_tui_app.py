@@ -16,11 +16,12 @@ def _models() -> list[LocalModel]:
     ]
 
 
-def _ingest_at_model(tmp_path: Path) -> AppState:
+def _ingest_at_model(tmp_path: Path, ingest=None) -> AppState:
     state = AppState(
         preferred_embed="bge-m3",
         list_models=_models,
         browse_dir=tmp_path,
+        ingest=ingest or (lambda _path, _model: None),
     )
     state.handle("enter")
     state.load()
@@ -28,7 +29,7 @@ def _ingest_at_model(tmp_path: Path) -> AppState:
 
 
 def test_home_opens_ingest_then_picks_an_embedding_model(tmp_path: Path):
-    (tmp_path / "notes.txt").write_text("hello")
+    (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.4")
     state = _ingest_at_model(tmp_path)
 
     assert state.step == Step.PICK_MODEL
@@ -44,21 +45,19 @@ def test_home_opens_ingest_then_picks_an_embedding_model(tmp_path: Path):
     assert state.browse_entries[0].kind == BrowseKind.USE_CURRENT
 
     state.handle("enter")
-    assert state.step == Step.PICK_TYPE
-
-    state.handle("enter")
     assert state.step == Step.PICK_FILE
-    assert state.files == ["notes.txt"]
+    assert state.selected_type == "pdf"
+    assert state.files == ["notes.pdf"]
 
     state.handle("enter")
     assert state.step == Step.READY
     state.handle("enter")
-    selection = state.selection()
-    assert state.step == Step.DONE
-    assert selection is not None
-    assert selection.action == Action.INGEST
-    assert selection.model == "bge-m3:latest"
-    assert selection.path == str((tmp_path / "notes.txt").resolve())
+    assert state.step == Step.INGESTING
+    state.finish_ingest()
+    assert state.step == Step.HOME
+    assert state.notice is not None
+    assert state.notice.ok
+    assert state.notice.message == "Ingested notes.pdf"
 
 
 def test_home_opens_chat_then_picks_a_chat_model():
@@ -85,10 +84,35 @@ def test_home_opens_chat_then_picks_a_chat_model():
     assert selection.path is None
 
 
-def test_ingest_esc_walks_back_through_the_path_picker(tmp_path: Path):
-    (tmp_path / "notes.txt").write_text("hello")
-    state = _ingest_at_model(tmp_path)
+def test_ingest_failure_returns_home_with_the_error(tmp_path: Path):
+    (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.4")
+    calls: list[tuple[str, str]] = []
+
+    def boom(path: str, model: str) -> None:
+        calls.append((path, model))
+        raise RuntimeError("could not embed")
+
+    state = _ingest_at_model(tmp_path, ingest=boom)
     state.handle("enter")
+    state.handle("enter")
+    state.handle("enter")
+    state.handle("enter")
+    state.finish_ingest()
+
+    assert calls == [
+        (str((tmp_path / "notes.pdf").resolve()), "bge-m3:latest"),
+    ]
+    assert state.step == Step.HOME
+    assert state.notice is not None
+    assert not state.notice.ok
+    assert state.notice.message == "could not embed"
+    assert state.action is None
+    assert state.selection() is None
+
+
+def test_ingest_esc_walks_back_through_the_path_picker(tmp_path: Path):
+    (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.4")
+    state = _ingest_at_model(tmp_path)
     state.handle("enter")
     state.handle("enter")
     state.handle("enter")
@@ -96,8 +120,6 @@ def test_ingest_esc_walks_back_through_the_path_picker(tmp_path: Path):
 
     state.handle("esc")
     assert state.step == Step.PICK_FILE
-    state.handle("esc")
-    assert state.step == Step.PICK_TYPE
     state.handle("esc")
     assert state.step == Step.PICK_DIR
     state.handle("esc")
@@ -107,7 +129,7 @@ def test_ingest_esc_walks_back_through_the_path_picker(tmp_path: Path):
 def test_ingest_navigates_into_a_nested_folder(tmp_path: Path):
     nested = tmp_path / "papers"
     nested.mkdir()
-    (nested / "guide.md").write_text("md")
+    (nested / "guide.pdf").write_bytes(b"%PDF-1.4")
     state = _ingest_at_model(tmp_path)
     state.handle("enter")
 
@@ -119,12 +141,10 @@ def test_ingest_navigates_into_a_nested_folder(tmp_path: Path):
 
     assert state.browse_dir == nested.resolve()
     state.handle("enter")
-    state.handle("down")
+    assert state.selected_type == "pdf"
+    assert state.files == ["guide.pdf"]
     state.handle("enter")
-    assert state.selected_type == "md"
-    assert state.files == ["guide.md"]
-    state.handle("enter")
-    assert state.selected_file == str((nested / "guide.md").resolve())
+    assert state.selected_file == str((nested / "guide.pdf").resolve())
 
 
 def test_ingest_does_not_select_when_the_folder_has_no_matching_files(
@@ -133,13 +153,24 @@ def test_ingest_does_not_select_when_the_folder_has_no_matching_files(
     state = _ingest_at_model(tmp_path)
     state.handle("enter")
     state.handle("enter")
-    state.handle("enter")
 
     assert state.step == Step.PICK_FILE
     assert state.files == []
     state.handle("enter")
     assert state.step == Step.PICK_FILE
     assert state.selection() is None
+
+
+def test_ingest_lists_only_pdfs_in_the_folder(tmp_path: Path):
+    (tmp_path / "keep.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "notes.txt").write_text("hello")
+    (tmp_path / "guide.md").write_text("md")
+    state = _ingest_at_model(tmp_path)
+    state.handle("enter")
+    state.handle("enter")
+
+    assert state.step == Step.PICK_FILE
+    assert state.files == ["keep.pdf"]
 
 
 def test_folder_listing_error_stays_on_the_dir_picker(tmp_path: Path):
@@ -219,3 +250,31 @@ def test_folder_picker_render_shows_use_this_folder(tmp_path: Path):
     text = console.export_text()
     assert "use this folder" in text
     assert "Folder" in text
+    assert "PDFs" in text
+
+
+def test_file_picker_render_lists_pdfs(tmp_path: Path):
+    (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.4")
+    state = _ingest_at_model(tmp_path)
+    state.handle("enter")
+    state.handle("enter")
+    console = Console(record=True, width=80)
+    console.print(render(state, 80, 24))
+    text = console.export_text()
+    assert "PDF files" in text
+    assert "notes.pdf" in text
+
+
+def test_home_render_shows_ingest_result(tmp_path: Path):
+    (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.4")
+    state = _ingest_at_model(tmp_path)
+    state.handle("enter")
+    state.handle("enter")
+    state.handle("enter")
+    state.handle("enter")
+    state.finish_ingest()
+    console = Console(record=True, width=80)
+    console.print(render(state, 80, 24))
+    text = console.export_text()
+    assert "Ingested notes.pdf" in text
+    assert "What do you want to do?" in text
