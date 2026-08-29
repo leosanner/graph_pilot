@@ -7,7 +7,7 @@ This is a learning project: the ingest path is wired end to end. Chat and query 
 ## What it does today
 
 - Split a UTF-8 text file, embed batches with Ollama, persist document + chunk rows
-- Terminal UI (`ragp1`) to choose **Ingest** and the embedding model, then a path
+- Terminal UI (`ragp1`) to choose **Ingest**, the embedding model, then a folder and file
 - CLI: `ragp1 ingest path/to/file.txt`
 - HNSW index on chunk embeddings (cosine) for the retrieval step that is not wired yet
 
@@ -25,7 +25,7 @@ make up
 
 That copies `.env` if it is missing, installs deps, starts Postgres, applies migrations, pulls the embed model, and opens the TUI. How that pipeline works: [`docs/dev/project-up.md`](docs/dev/project-up.md).
 
-Choose **Ingest**, pick the model, then enter a UTF-8 text file path.
+Choose **Ingest**, pick the model, then browse to a UTF-8 `.txt` or `.md` file.
 
 CLI, after the stack is up:
 

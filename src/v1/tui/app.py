@@ -1,4 +1,4 @@
-"""Minimal LazyDocs terminal: pick a path, then pick that path's model."""
+"""Minimal LazyDocs terminal: pick ingest or chat, then that path's model."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import termios
 import tty
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Callable
 
 from rich.align import Align
@@ -23,6 +24,7 @@ from v1.tui.logo import (
     GREEN,
     LIME,
     MUTED,
+    PANEL,
     RED,
     SELECT,
     TEAL,
@@ -36,6 +38,14 @@ from v1.tui.models import (
     list_local_models,
     models_for_role,
 )
+from v1.tui.paths import (
+    FILE_TYPES,
+    BrowseEntry,
+    BrowseKind,
+    format_dir,
+    list_browse_entries,
+    list_files_by_type,
+)
 
 OLLAMA_DOCS = "https://docs.ollama.com/"
 
@@ -44,6 +54,9 @@ class Step(StrEnum):
     HOME = "home"
     LOADING = "loading"
     PICK_MODEL = "pick_model"
+    PICK_DIR = "pick_dir"
+    PICK_TYPE = "pick_type"
+    PICK_FILE = "pick_file"
     READY = "ready"
     ERROR = "error"
     DONE = "done"
@@ -80,6 +93,7 @@ ACTION_OPTIONS = (
 class Selection:
     action: Action
     model: str
+    path: str | None = None
 
 
 @dataclass
@@ -95,6 +109,18 @@ class AppState:
     preferred_embed: str = ""
     preferred_chat: str = ""
     list_models: Callable[[], list[LocalModel]] = list_local_models
+    browse_dir: Path = field(default_factory=Path.cwd)
+    browse_entries: list[BrowseEntry] = field(default_factory=list)
+    browse_cursor: int = 0
+    browse_err: str = ""
+    file_type_cursor: int = 0
+    selected_type: str = ""
+    files: list[str] = field(default_factory=list)
+    files_cursor: int = 0
+    files_err: str = ""
+    selected_file: str = ""
+    list_entries: Callable[[Path], list[BrowseEntry]] = list_browse_entries
+    list_files: Callable[[Path, str], list[str]] = list_files_by_type
 
     def current_option(self) -> ActionOption:
         return ACTION_OPTIONS[self.action_cursor]
@@ -161,8 +187,16 @@ class AppState:
         if key == "esc":
             if self.step == Step.PICK_MODEL:
                 self.step = Step.HOME
-            elif self.step == Step.READY:
+            elif self.step == Step.PICK_DIR:
                 self.step = Step.PICK_MODEL
+            elif self.step == Step.PICK_TYPE:
+                self.step = Step.PICK_DIR
+            elif self.step == Step.PICK_FILE:
+                self.step = Step.PICK_TYPE
+            elif self.step == Step.READY:
+                self.step = (
+                    Step.PICK_FILE if self.action == Action.INGEST else Step.PICK_MODEL
+                )
             return
 
         if self.step == Step.PICK_MODEL:
@@ -173,7 +207,23 @@ class AppState:
             elif key in {"down", "j"}:
                 self._move(1)
             elif key == "enter":
-                self.step = Step.READY
+                if self.action == Action.INGEST:
+                    self._load_browse(self.browse_dir)
+                    self.step = Step.PICK_DIR
+                else:
+                    self.step = Step.READY
+            return
+
+        if self.step == Step.PICK_DIR:
+            self._handle_browse(key)
+            return
+
+        if self.step == Step.PICK_TYPE:
+            self._handle_file_type(key)
+            return
+
+        if self.step == Step.PICK_FILE:
+            self._handle_files(key)
             return
 
         if self.step == Step.READY and key == "enter":
@@ -192,10 +242,88 @@ class AppState:
             return
         self.model_cursor = (self.model_cursor + delta) % len(self.model_items)
 
+    def _nudge(self, attr: str, count: int, delta: int) -> None:
+        if count <= 0:
+            return
+        current = getattr(self, attr)
+        setattr(self, attr, max(0, min(count - 1, current + delta)))
+
+    def _load_browse(self, directory: Path) -> None:
+        self.browse_cursor = 0
+        try:
+            directory = directory.resolve()
+            self.browse_dir = directory
+            self.browse_entries = self.list_entries(directory)
+            self.browse_err = ""
+        except OSError as exc:
+            self.browse_dir = directory
+            self.browse_entries = []
+            self.browse_err = str(exc)
+
+    def _load_files(self) -> None:
+        self.files_cursor = 0
+        try:
+            self.files = self.list_files(self.browse_dir, self.selected_type)
+            self.files_err = ""
+        except OSError as exc:
+            self.files = []
+            self.files_err = str(exc)
+
+    def _handle_browse(self, key: str) -> None:
+        if key in {"up", "k"}:
+            self._nudge("browse_cursor", len(self.browse_entries), -1)
+            return
+        if key in {"down", "j"}:
+            self._nudge("browse_cursor", len(self.browse_entries), 1)
+            return
+        if key != "enter" or not self.browse_entries:
+            return
+        entry = self.browse_entries[self.browse_cursor]
+        if entry.kind == BrowseKind.USE_CURRENT:
+            self.file_type_cursor = 0
+            self.step = Step.PICK_TYPE
+            return
+        self._load_browse(entry.path)
+
+    def _handle_file_type(self, key: str) -> None:
+        if key in {"up", "k"}:
+            self._nudge("file_type_cursor", len(FILE_TYPES), -1)
+            return
+        if key in {"down", "j"}:
+            self._nudge("file_type_cursor", len(FILE_TYPES), 1)
+            return
+        if key != "enter":
+            return
+        self.selected_type = FILE_TYPES[self.file_type_cursor]
+        self._load_files()
+        self.step = Step.PICK_FILE
+
+    def _handle_files(self, key: str) -> None:
+        if key in {"up", "k"}:
+            self._nudge("files_cursor", len(self.files), -1)
+            return
+        if key in {"down", "j"}:
+            self._nudge("files_cursor", len(self.files), 1)
+            return
+        if key != "enter" or self.files_err or not self.files:
+            return
+        self.selected_file = str(
+            (self.browse_dir / self.files[self.files_cursor]).resolve()
+        )
+        self.step = Step.READY
+
     def selection(self) -> Selection | None:
         model = self.selected_model()
         if self.action is None or model is None:
             return None
+        if self.action == Action.INGEST:
+            if not self.selected_file:
+                return None
+            return Selection(
+                action=self.action,
+                model=model.name,
+                path=self.selected_file,
+            )
         return Selection(action=self.action, model=model.name)
 
 
@@ -238,9 +366,105 @@ def read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def _chip(label: str, *, selected: bool = False) -> Text:
-    bg = LIME if selected else CYAN
-    return Text(f" {label} ", style=f"bold {DARK} on {bg}")
+def _chip(label: str) -> Text:
+    """Compact badge for confirmed values (ready screen, exit summary)."""
+    return Text(f" {label} ", style=f"bold {DARK} on {CYAN}")
+
+
+def _path_badge(label: str) -> Text:
+    """Current folder context — visually separate from selectable rows."""
+    return Text(f" {label} ", style=f"{TEAL} on {PANEL}")
+
+
+def _plain_label_style(tone: str) -> str:
+    return {
+        "action": f"bold {GREEN}",
+        "parent": f"italic {MUTED}",
+        "dir": TEAL,
+        "item": TEAL,
+    }.get(tone, TEAL)
+
+
+def _selected_label_style(tone: str) -> str:
+    return {
+        "action": f"bold {LIME} underline",
+        "parent": f"italic {TEAL} underline",
+        "dir": f"bold {CYAN} underline",
+        "item": f"bold {LIME} underline",
+    }.get(tone, f"bold {LIME} underline")
+
+
+def _confirm_chip(label: str, *, selected: bool) -> Text:
+    bg = LIME if selected else GREEN
+    style = f"bold {DARK} on {bg}"
+    if selected:
+        style += " underline"
+    return Text(f" {label} ", style=style)
+
+
+def _browse_action_row(*, selected: bool) -> Text:
+    row = Text("▸ " if selected else "  ", style=f"bold {LIME}" if selected else "")
+    row.append_text(_confirm_chip("✓  use this folder", selected=selected))
+    return row
+
+
+def _browse_parent_row(*, selected: bool) -> Text:
+    row = Text("▸ " if selected else "  ", style=f"bold {LIME}" if selected else "")
+    label_style = f"italic {TEAL} underline" if selected else f"italic {MUTED}"
+    row.append("←  .. (up)", style=label_style)
+    return row
+
+
+def _browse_divider() -> Text:
+    return Text("  " + "─" * 28, style=MUTED)
+
+
+def _picker_row(
+    label: str,
+    *,
+    selected: bool,
+    tone: str = "item",
+    detail: str = "",
+) -> Text:
+    if selected:
+        row = Text()
+        row.append("▸ ", style=f"bold {LIME}")
+        row.append(label, style=_selected_label_style(tone))
+        if detail:
+            row.append(f"  {detail}", style=MUTED)
+        return row
+
+    row = Text("  ", style="")
+    row.append(label, style=_plain_label_style(tone))
+    if detail:
+        row.append(f"  {detail}", style=MUTED)
+    return row
+
+
+def _picker_screen(
+    title: str,
+    hint: str,
+    list_rows: list,
+    *,
+    folder: Path | None = None,
+) -> Padding:
+    parts: list = [
+        Text(title, style=f"bold {CYAN}"),
+        Text(hint, style=MUTED),
+    ]
+    if folder is not None:
+        parts.extend([Text(""), _line("folder", _path_badge(format_dir(folder)))])
+    if list_rows:
+        parts.extend([Text(""), *list_rows])
+    return Padding(
+        Panel(
+            Group(*parts),
+            box=ROUNDED,
+            border_style=MUTED,
+            padding=(1, 2),
+        ),
+        (1, 2),
+    )
 
 
 def _meta_bits(model: LocalModel) -> str:
@@ -296,6 +520,15 @@ def render(state: AppState, width: int, height: int) -> Group:
     elif state.step == Step.PICK_MODEL:
         parts.append(_model_picker(state, height))
         parts.append(_help("↑↓ move  •  enter select  •  esc home  •  q quit"))
+    elif state.step == Step.PICK_DIR:
+        parts.append(_dir_picker(state, height))
+        parts.append(_help("↑↓ move  •  enter open/use  •  esc back  •  q quit"))
+    elif state.step == Step.PICK_TYPE:
+        parts.append(_type_picker(state))
+        parts.append(_help("↑↓ move  •  enter select  •  esc back  •  q quit"))
+    elif state.step == Step.PICK_FILE:
+        parts.append(_file_picker(state, height))
+        parts.append(_help("↑↓ move  •  enter select  •  esc back  •  q quit"))
     elif state.step == Step.READY:
         parts.append(_ready_body(state))
         parts.append(_help("enter continue  •  esc back  •  q quit"))
@@ -384,53 +617,154 @@ def _model_picker(state: AppState, height: int) -> Padding:
         title = "Chat model"
         hint = "Used to answer questions."
 
-    rows: list = [
-        Text(title, style=f"bold {CYAN}"),
-        Text(hint, style=MUTED),
-        Text(""),
-    ]
     items = state.model_items
     if not items:
-        rows.append(Text("  no models in this list", style=MUTED))
-        return Padding(Group(*rows), (1, 2))
+        return _picker_screen(
+            title,
+            hint,
+            [Text("  no models in this list", style=MUTED)],
+        )
 
-    visible = max(3, height - 12) if height else len(items)
+    visible = max(3, height - 14) if height else len(items)
     start, end = _window(state.model_cursor, len(items), visible)
+    list_rows: list = []
     if start > 0:
-        rows.append(Text(f"  ↑ {start} above", style=MUTED))
+        list_rows.append(Text(f"  ↑ {start} above", style=MUTED))
     for index in range(start, end):
-        rows.append(_model_row(items[index], selected=index == state.model_cursor))
+        list_rows.append(_model_row(items[index], selected=index == state.model_cursor))
     remaining = len(items) - end
     if remaining > 0:
-        rows.append(Text(f"  ↓ {remaining} below", style=MUTED))
-    return Padding(Group(*rows), (1, 2))
+        list_rows.append(Text(f"  ↓ {remaining} below", style=MUTED))
+    return _picker_screen(title, hint, list_rows)
 
 
 def _model_row(model: LocalModel, *, selected: bool) -> Text:
-    marker = "▶ " if selected else "  "
-    marker_style = f"bold {SELECT}" if selected else MUTED
-    row = Text(marker, style=marker_style)
-    row.append_text(_chip(model.name, selected=selected))
-    meta = _meta_bits(model)
-    if meta:
-        row.append(f"  {meta}", style=MUTED)
-    return row
+    return _picker_row(
+        model.name,
+        selected=selected,
+        tone="item",
+        detail=_meta_bits(model),
+    )
+
+
+def _dir_picker(state: AppState, height: int) -> Padding:
+    title = "Folder"
+    hint = "Navigate to the folder that holds the documents."
+    if state.browse_err:
+        return _picker_screen(
+            title,
+            hint,
+            [Text("✗  " + state.browse_err, style=f"bold {RED}")],
+            folder=state.browse_dir,
+        )
+    items = state.browse_entries
+    if not items:
+        return _picker_screen(
+            title,
+            hint,
+            [Text("  empty folder", style=MUTED)],
+            folder=state.browse_dir,
+        )
+
+    visible = max(3, height - 16) if height else len(items)
+    start, end = _window(state.browse_cursor, len(items), visible)
+    list_rows: list = []
+    if start > 0:
+        list_rows.append(Text(f"  ↑ {start} above", style=MUTED))
+    for index in range(start, end):
+        entry = items[index]
+        if (
+            index > start
+            and entry.kind == BrowseKind.DIR
+            and items[index - 1].kind == BrowseKind.PARENT
+        ):
+            list_rows.append(_browse_divider())
+        list_rows.append(_browse_row(entry, selected=index == state.browse_cursor))
+    remaining = len(items) - end
+    if remaining > 0:
+        list_rows.append(Text(f"  ↓ {remaining} below", style=MUTED))
+    return _picker_screen(title, hint, list_rows, folder=state.browse_dir)
+
+
+def _browse_row(entry: BrowseEntry, *, selected: bool) -> Text:
+    if entry.kind == BrowseKind.USE_CURRENT:
+        return _browse_action_row(selected=selected)
+    if entry.kind == BrowseKind.PARENT:
+        return _browse_parent_row(selected=selected)
+    return _picker_row(f"{entry.name}/", selected=selected, tone="dir")
+
+
+def _type_picker(state: AppState) -> Padding:
+    list_rows = [
+        _choice_row(file_type.upper(), selected=index == state.file_type_cursor)
+        for index, file_type in enumerate(FILE_TYPES)
+    ]
+    return _picker_screen(
+        "File type",
+        "Only UTF-8 text is ingestible today.",
+        list_rows,
+        folder=state.browse_dir,
+    )
+
+
+def _file_picker(state: AppState, height: int) -> Padding:
+    kind = state.selected_type.upper() or "TXT"
+    title = f"{kind} files"
+    hint = "Pick the document to chunk and index."
+    if state.files_err:
+        return _picker_screen(
+            title,
+            hint,
+            [Text("✗  " + state.files_err, style=f"bold {RED}")],
+            folder=state.browse_dir,
+        )
+    items = state.files
+    if not items:
+        suffix = state.selected_type or "txt"
+        return _picker_screen(
+            title,
+            hint,
+            [Text(f"  no .{suffix} files in this folder", style=MUTED)],
+            folder=state.browse_dir,
+        )
+
+    visible = max(3, height - 16) if height else len(items)
+    start, end = _window(state.files_cursor, len(items), visible)
+    list_rows: list = []
+    if start > 0:
+        list_rows.append(Text(f"  ↑ {start} above", style=MUTED))
+    for index in range(start, end):
+        list_rows.append(_choice_row(items[index], selected=index == state.files_cursor))
+    remaining = len(items) - end
+    if remaining > 0:
+        list_rows.append(Text(f"  ↓ {remaining} below", style=MUTED))
+    return _picker_screen(title, hint, list_rows, folder=state.browse_dir)
+
+
+def _choice_row(label: str, *, selected: bool) -> Text:
+    return _picker_row(label, selected=selected, tone="item")
 
 
 def _ready_body(state: AppState) -> Padding:
     model = state.selected_model()
     action_label = state.feature_title()
     model_label = "embedding" if state.action == Action.INGEST else "chat"
-    return Padding(
-        Group(
-            Text("Ready", style=f"bold {CYAN}"),
-            Text(f"{action_label} will use this model.", style=MUTED),
-            Text(""),
-            _line("action", _chip(action_label.lower())),
-            _line(model_label, _chip(model.name) if model else Text("—", style=MUTED)),
-        ),
-        (1, 2),
+    hint = (
+        f"{action_label} will use this file and model."
+        if state.action == Action.INGEST
+        else f"{action_label} will use this model."
     )
+    lines = [
+        Text("Ready", style=f"bold {CYAN}"),
+        Text(hint, style=MUTED),
+        Text(""),
+        _line("action", _chip(action_label.lower())),
+        _line(model_label, _chip(model.name) if model else Text("—", style=MUTED)),
+    ]
+    if state.action == Action.INGEST:
+        file_name = Path(state.selected_file).name if state.selected_file else "—"
+        lines.append(_line("file", _chip(file_name)))
+    return Padding(Group(*lines), (1, 2))
 
 
 def run(console: Console | None = None) -> Selection | None:
@@ -465,5 +799,7 @@ def run(console: Console | None = None) -> Selection | None:
     console.print(_line("action", _chip(selection.action)))
     label = "embedding" if selection.action == Action.INGEST else "chat"
     console.print(_line(label, _chip(selection.model)))
+    if selection.path:
+        console.print(_line("file", _chip(Path(selection.path).name)))
     console.print()
     return selection

@@ -97,8 +97,9 @@ def default(ctx: typer.Context) -> None:
         raise typer.Exit(code=0)
 
     if selection.action == Action.INGEST:
-        path = Path(typer.prompt("Document path"))
-        run_ingest(path, selection.model)
+        if not selection.path:
+            raise typer.Exit(code=1)
+        run_ingest(Path(selection.path), selection.model)
         return
 
     typer.echo(f"query {selection.model}")
