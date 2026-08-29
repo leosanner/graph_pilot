@@ -1,7 +1,8 @@
 from v1.infra.database import PostgresClient
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
-from datetime import datetime, UTC
+from psycopg.types.json import Jsonb
 
 
 INSERT_VECTOR_QUERY = """
@@ -48,7 +49,14 @@ class VectorRepository:
         cursor.executemany(
           INSERT_VECTOR_QUERY,
           [
-            (entity.id, entity.document_id, entity.content, entity.position, entity.embedding, entity.metadata)
+            (
+              entity.id,
+              entity.document_id,
+              entity.content,
+              entity.position,
+              entity.embedding,
+              Jsonb(entity.metadata),
+            )
             for entity in entities
           ]
         )
