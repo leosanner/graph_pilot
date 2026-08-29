@@ -1,5 +1,5 @@
 from langchain_core.tools import tool
-from v1.app.agent.rag.retrieval import Retrieval, VectorSearch
+from v1.app.agent.rag.retrieval import Retrieval, VectorSearch, QueryResult
 from langchain_core.embeddings import Embeddings
 from dataclasses import dataclass
 
@@ -14,8 +14,8 @@ def make_search_tool(
     config:Config
 ):
 
-  @tool
-  def search_tool(query:str) -> str:
+  @tool(response_format="content_and_artifact")
+  def search_tool(query:str) -> tuple[str, list[QueryResult]]:
     """Retrieve passages from the local ingested document collection.
 
     Use this whenever the answer may be in the user's PDFs or other
@@ -31,8 +31,9 @@ def make_search_tool(
             the full conversation history.
 
     Returns:
-        The closest matching chunk texts, separated by blank lines. An
-        empty string means nothing was indexed or nothing matched.
+        The closest matching chunk texts, separated by blank lines. If
+        nothing was indexed or nothing matched, a short message saying
+        so, with permission to retry once or inform the user.
     """
 
     emb = embeddings.embed_query(query)
@@ -43,6 +44,15 @@ def make_search_tool(
       )
     )
 
-    return "\n\n".join(h.content for h in hits)
+    if not hits:
+      return (
+        "No matching passages were found in the ingested documents. "
+        "Do not answer as if the corpus contained this information. "
+        "You may retry once with a more specific standalone query, "
+        "or inform the user.",
+        [],
+      )
+
+    return "\n\n".join(h.content for h in hits), hits
 
   return search_tool
