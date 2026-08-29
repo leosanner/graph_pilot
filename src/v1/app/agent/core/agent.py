@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 
 from langchain_core.embeddings import Embeddings
+from langchain_core.messages import HumanMessage
 
 from v1.app.agent.config.settings import ModelSettings
 from v1.app.agent.core.graph import build_graph, make_call_model
 from v1.app.agent.core.llm import new_chat_model
+from v1.app.agent.core.state import InputState, State
 from v1.app.agent.rag.retrieval import Retrieval
 from v1.app.agent.rag.tool import Config, make_search_tool
 
@@ -30,3 +32,23 @@ class Agent:
     model = new_chat_model(modelSettings)
     call_model = make_call_model(model, self.search_tool)
     self.graph = build_graph(call_model, self.search_tool)
+    self.messages = []
+
+  def invoke(self, message: str) -> str:
+    result = self.graph.invoke(self._input(message))
+    return self._commit(result)
+
+  async def ainvoke(self, message: str) -> str:
+    result = await self.graph.ainvoke(self._input(message))
+    return self._commit(result)
+
+  def reset(self) -> None:
+    self.messages = []
+
+  def _input(self, message: str) -> InputState:
+    return {"messages": [*self.messages, HumanMessage(content=message)]}
+
+  def _commit(self, result: State) -> str:
+    self.messages = list(result["messages"])
+    content = result["messages"][-1].content
+    return content if isinstance(content, str) else str(content)
