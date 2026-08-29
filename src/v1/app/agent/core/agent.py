@@ -1,21 +1,32 @@
-from v1.app.agent.rag.retrieval import Retrieval
-from v1.app.agent.rag.tool import make_search_tool
-from langchain_core.embeddings import Embeddings
-from v1.app.agent.core.graph import build_graph
 from dataclasses import dataclass
+
+from langchain_core.embeddings import Embeddings
+
+from v1.app.agent.config.settings import ModelSettings
+from v1.app.agent.core.graph import build_graph, make_call_model
+from v1.app.agent.core.llm import new_chat_model
+from v1.app.agent.rag.retrieval import Retrieval
+from v1.app.agent.rag.tool import Config, make_search_tool
 
 
 @dataclass
 class AgentRetrievalConfig:
   retrieval: Retrieval
   embeddings: Embeddings
+  config: Config
 
 
 class Agent:
-  def __init__(self, retrievalConfig: AgentRetrievalConfig):
+  def __init__(
+    self,
+    modelSettings: ModelSettings,
+    retrievalConfig: AgentRetrievalConfig,
+  ):
     self.search_tool = make_search_tool(
       retrievalConfig.retrieval,
-      retrievalConfig.embeddings
+      retrievalConfig.embeddings,
+      retrievalConfig.config,
     )
-    self.graph = build_graph()
-
+    model = new_chat_model(modelSettings)
+    call_model = make_call_model(model, self.search_tool)
+    self.graph = build_graph(call_model, self.search_tool)
