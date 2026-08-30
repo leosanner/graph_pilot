@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import typer
 from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 
+from v1.app.agent.config.settings import ModelSettings
+from v1.app.agent.core.agent import Agent, AgentRetrievalConfig
+from v1.app.agent.rag.retrieval import Retrieval
+from v1.app.agent.rag.tool import Config
 from v1.app.ingestion.ingestion import DocumentIngestion
 from v1.app.ingestion.loader.pdf_loader import PdfLoader
 from v1.app.ingestion.repository.vector import VectorRepository
@@ -26,6 +31,8 @@ app = typer.Typer(
     help="LazyDocs — local RAG from the terminal",
 )
 
+CHAT_TOP_K = 5
+
 
 def document_from_path(path: Path) -> Document:
     if not path.is_file():
@@ -38,21 +45,22 @@ def document_from_path(path: Path) -> Document:
         raise typer.BadParameter(str(exc)) from exc
 
 
+def ollama_embeddings(model_name: str) -> OllamaEmbeddings:
+    base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
+    if base_url:
+        return OllamaEmbeddings(model=model_name, base_url=base_url)
+    return OllamaEmbeddings(model=model_name)
+
+
 def vector_processor(model_name: str) -> VectorProcessor:
     metadata = load_model_metadata(model_name)
     chunk_size = max(128, metadata.context_length)
     chunk_overlap = max(32, chunk_size // 10)
-    base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
-    embeddings = (
-        OllamaEmbeddings(model=model_name, base_url=base_url)
-        if base_url
-        else OllamaEmbeddings(model=model_name)
-    )
     return VectorProcessor(
         VectorSettings(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            model=embeddings,
+            model=ollama_embeddings(model_name),
             model_name=model_name,
         ),
         RuntimeSettings(),
@@ -89,16 +97,53 @@ def embed_model_from_env() -> str:
     return model_name
 
 
+@dataclass
+class AgentChatSession:
+    """Keeps the pool alive for the whole conversation, not per question."""
+
+    agent: Agent
+    client: PostgresClient
+
+    def ask(self, question: str) -> str:
+        return self.agent.invoke(question)
+
+    def close(self) -> None:
+        self.client.close()
+
+
+def open_chat(chat_model: str) -> AgentChatSession:
+    # Queries must be embedded by the model that produced the stored vectors,
+    # otherwise the distances are meaningless.
+    embed_model = os.environ.get("OLLAMA_EMBED_MODEL", "").strip()
+    if not embed_model:
+        raise RuntimeError("Set OLLAMA_EMBED_MODEL to the model you ingested with.")
+
+    client = PostgresClient(PostgresSettings())
+    try:
+        agent = Agent(
+            ModelSettings(
+                model_provider="ollama",
+                model_name=chat_model,
+                temperature=0,
+            ),
+            AgentRetrievalConfig(
+                retrieval=Retrieval(client),
+                embeddings=ollama_embeddings(embed_model),
+                config=Config(top_k=CHAT_TOP_K),
+            ),
+        )
+    except Exception:
+        client.close()
+        raise
+    return AgentChatSession(agent=agent, client=client)
+
+
 @app.callback(invoke_without_command=True)
 def default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
-    selection = run_tui(ingest=_tui_ingest)
-    if selection is None:
-        raise typer.Exit(code=0)
-
-    typer.echo(f"query {selection.model}")
+    run_tui(ingest=_tui_ingest, open_chat=open_chat)
 
 
 @app.command()
@@ -110,8 +155,21 @@ def ingest(
 
 
 @app.command()
-def query(question: str) -> None:
-    typer.echo(f"query {question!r}")
+def query(question: str, model: str | None = None) -> None:
+    chat_model = model or os.environ.get("OLLAMA_MODEL", "").strip()
+    if not chat_model:
+        raise typer.BadParameter("Pass --model or set OLLAMA_MODEL")
+
+    try:
+        session = open_chat(chat_model)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        typer.echo(session.ask(question))
+    finally:
+        session.close()
 
 
 def _tui_ingest(path: str, model: str) -> None:

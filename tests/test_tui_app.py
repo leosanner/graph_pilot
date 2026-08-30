@@ -2,7 +2,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from v1.tui.app import Action, AppState, Step, render
+from v1.tui.app import Action, AppState, Speaker, Step, render
 from v1.tui.models import LocalModel, ModelListError
 from v1.tui.paths import BrowseKind
 
@@ -82,6 +82,206 @@ def test_home_opens_chat_then_picks_a_chat_model():
     assert selection.action == Action.CHAT
     assert selection.model == "qwen2.5:7b"
     assert selection.path is None
+
+
+class FakeSession:
+    def __init__(self, reply: str = "42 pages, all of them dull.", error: Exception | None = None):
+        self.reply = reply
+        self.error = error
+        self.asked: list[str] = []
+        self.closed = False
+
+    def ask(self, question: str) -> str:
+        self.asked.append(question)
+        if self.error is not None:
+            raise self.error
+        return self.reply
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _chat_at_prompt(session: FakeSession | None = None) -> tuple[AppState, FakeSession]:
+    session = session or FakeSession()
+    state = AppState(
+        preferred_chat="qwen2.5:7b",
+        list_models=_models,
+        open_chat=lambda _model: session,
+    )
+    state.handle("down")
+    state.handle("enter")
+    state.load()
+    state.handle("enter")
+    state.handle("enter")
+    state.start_chat()
+    return state, session
+
+
+def _type(state: AppState, text: str) -> None:
+    for char in text:
+        state.handle(char)
+
+
+def test_chat_sends_a_question_and_shows_the_answer():
+    state, session = _chat_at_prompt()
+    assert state.step == Step.CHAT
+
+    _type(state, "how long is the report?")
+    assert state.draft == "how long is the report?"
+
+    state.handle("enter")
+    assert state.step == Step.THINKING
+    assert state.draft == ""
+
+    state.answer()
+    assert state.step == Step.CHAT
+    assert session.asked == ["how long is the report?"]
+    assert [(turn.speaker, turn.text) for turn in state.turns] == [
+        (Speaker.USER, "how long is the report?"),
+        (Speaker.AGENT, "42 pages, all of them dull."),
+    ]
+
+
+def test_chat_typing_does_not_trigger_the_single_letter_shortcuts():
+    state, _ = _chat_at_prompt()
+
+    _type(state, "quick req")
+
+    assert state.step == Step.CHAT
+    assert state.draft == "quick req"
+
+
+def test_chat_backspace_edits_the_draft():
+    state, _ = _chat_at_prompt()
+
+    _type(state, "abc")
+    state.handle("backspace")
+    state.handle("backspace")
+
+    assert state.draft == "a"
+
+
+def test_chat_ignores_an_empty_question():
+    state, session = _chat_at_prompt()
+
+    _type(state, "   ")
+    state.handle("enter")
+
+    assert state.step == Step.CHAT
+    assert state.turns == []
+    assert session.asked == []
+
+
+def test_chat_keeps_going_after_the_agent_fails():
+    state, session = _chat_at_prompt(FakeSession(error=RuntimeError("ollama is down")))
+
+    _type(state, "hello")
+    state.handle("enter")
+    state.answer()
+
+    assert state.step == Step.CHAT
+    assert state.turns[-1].speaker == Speaker.FAILURE
+    assert state.turns[-1].text == "ollama is down"
+
+    session.error = None
+    _type(state, "again")
+    state.handle("enter")
+    state.answer()
+
+    assert state.turns[-1].speaker == Speaker.AGENT
+
+
+def test_chat_esc_closes_the_session_and_returns_home():
+    state, session = _chat_at_prompt()
+    _type(state, "hi")
+    state.handle("enter")
+    state.answer()
+
+    state.handle("esc")
+
+    assert state.step == Step.HOME
+    assert state.notice is None
+    assert session.closed
+    assert state.session is None
+    assert state.turns == []
+
+
+def test_chat_ctrl_c_closes_the_session_before_quitting():
+    state, session = _chat_at_prompt()
+
+    state.handle("ctrl+c")
+
+    assert state.step == Step.QUIT
+    assert session.closed
+
+
+def test_chat_without_a_configured_session_returns_home_with_a_notice():
+    state = AppState(preferred_chat="qwen2.5:7b", list_models=_models)
+    state.handle("down")
+    state.handle("enter")
+    state.load()
+    state.handle("enter")
+    state.handle("enter")
+    assert state.step == Step.OPENING_CHAT
+
+    state.start_chat()
+
+    assert state.step == Step.HOME
+    assert state.notice is not None
+    assert not state.notice.ok
+    assert state.notice.message == "Chat is not configured."
+
+
+def test_chat_start_failure_returns_home_with_the_error():
+    def boom(_model: str):
+        raise RuntimeError("no chunks ingested yet")
+
+    state = AppState(
+        preferred_chat="qwen2.5:7b",
+        list_models=_models,
+        open_chat=boom,
+    )
+    state.handle("down")
+    state.handle("enter")
+    state.load()
+    state.handle("enter")
+    state.handle("enter")
+    state.start_chat()
+
+    assert state.step == Step.HOME
+    assert state.notice is not None
+    assert not state.notice.ok
+    assert state.notice.message == "no chunks ingested yet"
+
+
+def test_chat_render_shows_the_transcript_and_the_draft():
+    state, _ = _chat_at_prompt()
+    _type(state, "how long is the report?")
+    state.handle("enter")
+    state.answer()
+    _type(state, "and the author?")
+
+    console = Console(record=True, width=80)
+    console.print(render(state, 80, 24))
+    text = console.export_text()
+
+    assert "how long is the report?" in text
+    assert "42 pages" in text
+    assert "and the author?" in text
+    assert "enter send" in text
+
+
+def test_chat_render_shows_a_thinking_hint_while_the_agent_runs():
+    state, _ = _chat_at_prompt()
+    _type(state, "why?")
+    state.handle("enter")
+
+    console = Console(record=True, width=80)
+    console.print(render(state, 80, 24))
+    text = console.export_text()
+
+    assert "thinking" in text
+    assert "why?" in text
 
 
 def test_ingest_failure_returns_home_with_the_error(tmp_path: Path):

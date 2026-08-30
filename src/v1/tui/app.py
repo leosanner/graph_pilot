@@ -6,10 +6,11 @@ import os
 import sys
 import termios
 import tty
+import textwrap
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from rich.align import Align
 from rich.box import ROUNDED
@@ -58,8 +59,10 @@ class Step(StrEnum):
     PICK_FILE = "pick_file"
     READY = "ready"
     INGESTING = "ingesting"
+    OPENING_CHAT = "opening_chat"
+    CHAT = "chat"
+    THINKING = "thinking"
     ERROR = "error"
-    DONE = "done"
     QUIT = "quit"
 
 
@@ -102,6 +105,26 @@ class Notice:
     message: str
 
 
+class ChatSession(Protocol):
+    """A live agent bound to one chat model, owned by the caller of `run`."""
+
+    def ask(self, question: str) -> str: ...
+
+    def close(self) -> None: ...
+
+
+class Speaker(StrEnum):
+    USER = "you"
+    AGENT = "lazydocs"
+    FAILURE = "failed"
+
+
+@dataclass(frozen=True)
+class Turn:
+    speaker: Speaker
+    text: str
+
+
 @dataclass
 class AppState:
     step: Step = Step.HOME
@@ -127,6 +150,11 @@ class AppState:
     list_entries: Callable[[Path], list[BrowseEntry]] = list_browse_entries
     list_files: Callable[[Path, str], list[str]] = list_files_by_type
     ingest: Callable[[str, str], None] | None = None
+    open_chat: Callable[[str], ChatSession] | None = None
+    session: ChatSession | None = None
+    turns: list[Turn] = field(default_factory=list)
+    draft: str = ""
+    pending: str = ""
     notice: Notice | None = None
 
     def current_option(self) -> ActionOption:
@@ -169,6 +197,12 @@ class AppState:
         self.step = Step.LOADING
 
     def handle(self, key: str) -> None:
+        # Chat comes first: every printable key belongs to the draft, so the
+        # single-letter shortcuts must not swallow it.
+        if self.step == Step.CHAT:
+            self._handle_chat(key)
+            return
+
         if key in {"q", "ctrl+c"}:
             self.step = Step.QUIT
             return
@@ -231,7 +265,7 @@ class AppState:
             if self.action == Action.INGEST:
                 self.step = Step.INGESTING
                 return
-            self.step = Step.DONE
+            self.step = Step.OPENING_CHAT
 
     def _prepare_picker(self) -> None:
         role = "embed" if self.action == Action.INGEST else "chat"
@@ -333,8 +367,70 @@ class AppState:
             return
         self._go_home(ok=True, message=f"Ingested {Path(selection.path).name}")
 
-    def _go_home(self, *, ok: bool, message: str) -> None:
-        self.notice = Notice(ok=ok, message=message)
+    def start_chat(self) -> None:
+        selection = self.selection()
+        if selection is None:
+            self._go_home(ok=False, message="Pick a chat model first.")
+            return
+        if self.open_chat is None:
+            self._go_home(ok=False, message="Chat is not configured.")
+            return
+        try:
+            self.session = self.open_chat(selection.model)
+        except Exception as exc:
+            self._go_home(ok=False, message=str(exc) or type(exc).__name__)
+            return
+        self.turns = []
+        self.draft = ""
+        self.pending = ""
+        self.step = Step.CHAT
+
+    def answer(self) -> None:
+        question, self.pending = self.pending, ""
+        self.step = Step.CHAT
+        if self.session is None or not question:
+            return
+        try:
+            reply = self.session.ask(question)
+        except Exception as exc:
+            self.turns.append(Turn(Speaker.FAILURE, str(exc) or type(exc).__name__))
+            return
+        self.turns.append(Turn(Speaker.AGENT, reply))
+
+    def leave_chat(self) -> None:
+        session, self.session = self.session, None
+        self.turns = []
+        self.draft = ""
+        self.pending = ""
+        if session is not None:
+            session.close()
+
+    def _handle_chat(self, key: str) -> None:
+        if key == "ctrl+c":
+            self.leave_chat()
+            self.step = Step.QUIT
+            return
+        if key == "esc":
+            self.leave_chat()
+            self._go_home()
+            return
+        if key == "enter":
+            question = self.draft.strip()
+            if not question:
+                return
+            self.turns.append(Turn(Speaker.USER, question))
+            self.pending = question
+            self.draft = ""
+            self.step = Step.THINKING
+            return
+        if key == "backspace":
+            self.draft = self.draft[:-1]
+            return
+        if len(key) == 1 and key.isprintable():
+            self.draft += key
+
+    def _go_home(self, *, ok: bool | None = None, message: str = "") -> None:
+        self.notice = None if ok is None else Notice(ok=ok, message=message)
         self.action = None
         self.selected_file = ""
         self.step = Step.HOME
@@ -350,6 +446,8 @@ def preferred_from_env() -> tuple[str, str]:
 def normalize_key(raw: str) -> str:
     if raw in {"\r", "\n"}:
         return "enter"
+    if raw in {"\x7f", "\x08"}:
+        return "backspace"
     if raw == "\x03":
         return "ctrl+c"
     if raw == "\x1b[A":
@@ -542,6 +640,15 @@ def render(state: AppState, width: int, height: int) -> Group:
     elif state.step == Step.PICK_FILE:
         parts.append(_file_picker(state, height))
         parts.append(_help("↑↓ move  •  enter select  •  esc back  •  q quit"))
+    elif state.step == Step.OPENING_CHAT:
+        parts.append(_section("Chat", "Loading the model and the index…"))
+        parts.append(_help("please wait"))
+    elif state.step in {Step.CHAT, Step.THINKING}:
+        parts.append(_chat_body(state, width, height))
+        if state.step == Step.THINKING:
+            parts.append(_help("searching your documents…"))
+        else:
+            parts.append(_help("enter send  •  esc home  •  ctrl+c quit"))
     elif state.step == Step.READY:
         parts.append(_ready_body(state))
         if state.action == Action.INGEST:
@@ -785,47 +892,96 @@ def _ready_body(state: AppState) -> Padding:
     return Padding(Group(*lines), (1, 2))
 
 
+def _speaker_style(speaker: Speaker) -> str:
+    return {
+        Speaker.USER: f"bold {CYAN}",
+        Speaker.AGENT: f"bold {LIME}",
+        Speaker.FAILURE: f"bold {RED}",
+    }[speaker]
+
+
+def _turn_rows(turn: Turn, width: int) -> list[Text]:
+    body_style = RED if turn.speaker == Speaker.FAILURE else TEAL
+    rows = [Text(turn.speaker, style=_speaker_style(turn.speaker))]
+    for paragraph in turn.text.splitlines() or [""]:
+        if not paragraph.strip():
+            rows.append(Text(""))
+            continue
+        for line in textwrap.wrap(paragraph, width=width) or [""]:
+            rows.append(Text(line, style=body_style))
+    return rows
+
+
+def _transcript_rows(turns: list[Turn], width: int, budget: int) -> list[Text]:
+    rows: list[Text] = []
+    for index, turn in enumerate(turns):
+        if index:
+            rows.append(Text(""))
+        rows.extend(_turn_rows(turn, width))
+    return rows[-budget:] if budget and len(rows) > budget else rows
+
+
+def _prompt_row(state: AppState) -> Text:
+    if state.step == Step.THINKING:
+        return Text("  ⋯  thinking…", style=MUTED)
+    row = Text("  ›  ", style=f"bold {LIME}")
+    row.append(state.draft, style=TEAL)
+    row.append("▌", style=CYAN)
+    return row
+
+
+def _chat_body(state: AppState, width: int, height: int) -> Padding:
+    inner = max(20, width - 12)
+    budget = max(4, height - 13) if height else 0
+    rows = _transcript_rows(state.turns, inner, budget)
+    if not rows:
+        rows = [Text("Ask anything about the documents you ingested.", style=MUTED)]
+    return Padding(
+        Group(
+            Panel(
+                Group(*rows),
+                box=ROUNDED,
+                border_style=MUTED,
+                padding=(1, 2),
+            ),
+            _prompt_row(state),
+        ),
+        (1, 2),
+    )
+
+
 def run(
     console: Console | None = None,
     *,
     ingest: Callable[[str, str], None] | None = None,
-) -> Selection | None:
+    open_chat: Callable[[str], ChatSession] | None = None,
+) -> None:
     console = console or Console()
     if not console.is_terminal or not sys.stdin.isatty():
         console.print("LazyDocs needs an interactive terminal.", style=f"bold {RED}")
-        return None
+        return
 
     preferred_embed, preferred_chat = preferred_from_env()
     state = AppState(
         preferred_embed=preferred_embed,
         preferred_chat=preferred_chat,
         ingest=ingest,
+        open_chat=open_chat,
     )
 
-    with console.screen() as screen:
-        while state.step not in {Step.DONE, Step.QUIT}:
-            screen.update(render(state, console.size.width, console.size.height))
-            if state.step == Step.LOADING:
-                state.load()
-                continue
-            if state.step == Step.INGESTING:
-                state.finish_ingest()
-                continue
-            state.handle(read_key())
-
-    if state.step != Step.DONE:
-        return None
-
-    selection = state.selection()
-    if selection is None:
-        return None
-
-    console.print()
-    console.print(Text("LAZYDOCS", style=f"bold {LIME}"))
-    console.print(_line("action", _chip(selection.action)))
-    label = "embedding" if selection.action == Action.INGEST else "chat"
-    console.print(_line(label, _chip(selection.model)))
-    if selection.path:
-        console.print(_line("file", _chip(Path(selection.path).name)))
-    console.print()
-    return selection
+    try:
+        with console.screen() as screen:
+            while state.step != Step.QUIT:
+                screen.update(render(state, console.size.width, console.size.height))
+                if state.step == Step.LOADING:
+                    state.load()
+                elif state.step == Step.INGESTING:
+                    state.finish_ingest()
+                elif state.step == Step.OPENING_CHAT:
+                    state.start_chat()
+                elif state.step == Step.THINKING:
+                    state.answer()
+                else:
+                    state.handle(read_key())
+    finally:
+        state.leave_chat()
