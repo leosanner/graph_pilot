@@ -1,6 +1,7 @@
 from v1.infra.database import PostgresClient
 from dataclasses import dataclass
 from uuid import UUID
+from pgvector import Vector
 
 QUERY = """
 SELECT id, document_id, content, position, embedding <=> %s AS distance
@@ -27,11 +28,16 @@ class Retrieval:
     self.client = client
 
   def vector_search(self, search:VectorSearch) -> list[QueryResult]:
+    # pgvector only registers dumpers for Vector and ndarray, so a plain list
+    # would bind as float8[] and miss the <=> operator.
+    embedding = Vector(search.embedding)
+
     with self.client.connection() as conn:
       with conn.cursor() as cursor:
-        result = cursor.execute(
+        cursor.execute(
           QUERY,
-          (search.embedding, search.embedding, search.top_k)
+          (embedding, embedding, search.top_k)
         )
+        rows = cursor.fetchall()
 
-    return [QueryResult(*row) for row in result.fetchall()]
+    return [QueryResult(*row) for row in rows]
