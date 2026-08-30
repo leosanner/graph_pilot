@@ -155,6 +155,7 @@ class AppState:
     turns: list[Turn] = field(default_factory=list)
     draft: str = ""
     pending: str = ""
+    chat_scroll: int = 0
     notice: Notice | None = None
 
     def current_option(self) -> ActionOption:
@@ -383,10 +384,12 @@ class AppState:
         self.turns = []
         self.draft = ""
         self.pending = ""
+        self.chat_scroll = 0
         self.step = Step.CHAT
 
     def answer(self) -> None:
         question, self.pending = self.pending, ""
+        self.chat_scroll = 0
         self.step = Step.CHAT
         if self.session is None or not question:
             return
@@ -402,6 +405,7 @@ class AppState:
         self.turns = []
         self.draft = ""
         self.pending = ""
+        self.chat_scroll = 0
         if session is not None:
             session.close()
 
@@ -414,6 +418,12 @@ class AppState:
             self.leave_chat()
             self._go_home()
             return
+        if key == "up":
+            self.chat_scroll += 1
+            return
+        if key == "down":
+            self.chat_scroll = max(0, self.chat_scroll - 1)
+            return
         if key == "enter":
             question = self.draft.strip()
             if not question:
@@ -421,6 +431,7 @@ class AppState:
             self.turns.append(Turn(Speaker.USER, question))
             self.pending = question
             self.draft = ""
+            self.chat_scroll = 0
             self.step = Step.THINKING
             return
         if key == "backspace":
@@ -648,7 +659,7 @@ def render(state: AppState, width: int, height: int) -> Group:
         if state.step == Step.THINKING:
             parts.append(_help("searching your documents…"))
         else:
-            parts.append(_help("enter send  •  esc home  •  ctrl+c quit"))
+            parts.append(_help("↑↓ scroll  •  enter send  •  esc home  •  ctrl+c quit"))
     elif state.step == Step.READY:
         parts.append(_ready_body(state))
         if state.action == Action.INGEST:
@@ -912,13 +923,43 @@ def _turn_rows(turn: Turn, width: int) -> list[Text]:
     return rows
 
 
-def _transcript_rows(turns: list[Turn], width: int, budget: int) -> list[Text]:
+def _transcript_rows(turns: list[Turn], width: int) -> list[Text]:
     rows: list[Text] = []
     for index, turn in enumerate(turns):
         if index:
             rows.append(Text(""))
         rows.extend(_turn_rows(turn, width))
-    return rows[-budget:] if budget and len(rows) > budget else rows
+    return rows
+
+
+def _visible_transcript(
+    turns: list[Turn], width: int, budget: int, scroll: int
+) -> tuple[list[Text], int]:
+    rows = _transcript_rows(turns, width)
+    total = len(rows)
+    if not budget or total <= budget:
+        return rows, 0
+
+    # Overflowing content needs at least one marker line. At the top or
+    # bottom that is one line; in the middle it is two.
+    inner = budget - 1
+    max_scroll = max(0, total - inner)
+    scroll = max(0, min(scroll, max_scroll))
+    end = total - scroll
+    start = end - inner
+    if start > 0:
+        inner = budget - 2
+        start = end - inner
+    start = max(0, start)
+
+    visible: list[Text] = []
+    if start > 0:
+        visible.append(Text(f"↑ {start} above", style=MUTED))
+    visible.extend(rows[start:end])
+    below = total - end
+    if below > 0:
+        visible.append(Text(f"↓ {below} below", style=MUTED))
+    return visible, scroll
 
 
 def _prompt_row(state: AppState) -> Text:
@@ -933,7 +974,9 @@ def _prompt_row(state: AppState) -> Text:
 def _chat_body(state: AppState, width: int, height: int) -> Padding:
     inner = max(20, width - 12)
     budget = max(4, height - 13) if height else 0
-    rows = _transcript_rows(state.turns, inner, budget)
+    rows, state.chat_scroll = _visible_transcript(
+        state.turns, inner, budget, state.chat_scroll
+    )
     if not rows:
         rows = [Text("Ask anything about the documents you ingested.", style=MUTED)]
     return Padding(

@@ -284,6 +284,66 @@ def test_chat_render_shows_a_thinking_hint_while_the_agent_runs():
     assert "why?" in text
 
 
+def _shown(state: AppState, *, width: int = 80, height: int = 24) -> str:
+    console = Console(record=True, width=width)
+    console.print(render(state, width, height))
+    return console.export_text()
+
+
+def test_chat_scrolls_a_long_answer_with_arrow_keys():
+    reply = "\n".join(f"line-{i:02d}" for i in range(40))
+    state, _ = _chat_at_prompt(FakeSession(reply=reply))
+    _type(state, "go")
+    state.handle("enter")
+    state.answer()
+
+    bottom = _shown(state)
+    assert "line-39" in bottom
+    assert "line-00" not in bottom
+    assert "above" in bottom
+    assert "↑↓ scroll" in bottom
+
+    for _ in range(100):
+        state.handle("up")
+    top = _shown(state)
+    assert "line-00" in top
+    assert "line-39" not in top
+    assert "below" in top
+
+    for _ in range(100):
+        state.handle("down")
+    bottom_again = _shown(state)
+    assert "line-39" in bottom_again
+    assert "line-00" not in bottom_again
+
+
+def test_chat_down_at_the_bottom_stays_put():
+    state, _ = _chat_at_prompt(FakeSession(reply="short"))
+    _type(state, "go")
+    state.handle("enter")
+    state.answer()
+
+    state.handle("down")
+    assert state.chat_scroll == 0
+    assert "short" in _shown(state)
+
+
+def test_chat_sending_a_question_resets_scroll_to_the_latest():
+    reply = "\n".join(f"line-{i:02d}" for i in range(40))
+    state, _ = _chat_at_prompt(FakeSession(reply=reply))
+    _type(state, "go")
+    state.handle("enter")
+    state.answer()
+    _shown(state)
+    state.handle("up")
+    state.handle("up")
+    assert state.chat_scroll > 0
+
+    _type(state, "next")
+    state.handle("enter")
+    assert state.chat_scroll == 0
+
+
 def test_ingest_failure_returns_home_with_the_error(tmp_path: Path):
     (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.4")
     calls: list[tuple[str, str]] = []
