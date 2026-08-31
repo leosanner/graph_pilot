@@ -23,6 +23,7 @@ from v1.app.ingestion.vector.processor import VectorProcessor
 from v1.app.ingestion.vector.settings import RuntimeSettings, VectorSettings
 from v1.app.ingestion.vector.utils.utils import load_model_metadata
 from v1.infra.database import PostgresClient, PostgresSettings
+from v1.infra.log.log import LogConfig, configure_logging
 from v1.tui.app import run as run_tui
 from v1.tui.paths import FILE_TYPE
 
@@ -177,4 +178,5 @@ def _tui_ingest(path: str, model: str) -> None:
 
 
 def main() -> None:
+    configure_logging(LogConfig(path=Path("logs/lazydocs.log")))
     app()

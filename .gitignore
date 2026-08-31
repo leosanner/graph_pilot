@@ -16,5 +16,8 @@ wheels/
 # Environment
 .env
 
+# Logs
+logs/
+
 #Pycharm
 .idea

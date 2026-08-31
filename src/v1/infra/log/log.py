@@ -1,7 +1,8 @@
 import logging
-from pathlib import Path
 from dataclasses import dataclass, field
 from enum import IntEnum
+from pathlib import Path
+
 import structlog
 
 
@@ -11,10 +12,11 @@ class LogLevel(IntEnum):
     INFO = logging.INFO
     WARNING = logging.WARNING
 
+
 @dataclass
 class LogConfig:
     path: Path
-    log_level: LogLevel= field(default=logging.INFO)
+    log_level: LogLevel = field(default=logging.INFO)
 
 
 def configure_logging(config: LogConfig) -> None:
