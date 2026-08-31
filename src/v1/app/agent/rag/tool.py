@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import structlog
 from langchain_core.embeddings import Embeddings
 from langchain_core.tools import tool
 
@@ -12,6 +13,7 @@ class Config:
 
 
 def make_search_tool(retrieval: Retrieval, embeddings: Embeddings, config: Config):
+    logger = structlog.get_logger()
 
     @tool(response_format="content_and_artifact")
     def search_tool(query: str) -> tuple[str, list[QueryResult]]:
@@ -37,6 +39,13 @@ def make_search_tool(retrieval: Retrieval, embeddings: Embeddings, config: Confi
 
         emb = embeddings.embed_query(query)
         hits = retrieval.vector_search(VectorSearch(embedding=emb, top_k=config.top_k))
+
+        logger.info(
+            "tool.search_tool",
+            query=query,
+            hits=len(hits),
+            hits_ids=[chunk.id for chunk in hits] if hits else [],
+        )
 
         if not hits:
             return (
