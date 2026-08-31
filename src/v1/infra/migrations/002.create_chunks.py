@@ -3,8 +3,8 @@ from yoyo import step
 __depends__ = {"001.create_documents"}
 
 steps = [
-  step(
-    """
+    step(
+        """
     CREATE EXTENSION IF NOT EXISTS vector;
 
     CREATE TABLE chunks (
@@ -20,6 +20,6 @@ steps = [
     CREATE INDEX chunks_embedding_hnsw
       ON chunks USING hnsw (embedding vector_cosine_ops)
     """,
-    "DROP TABLE chunks",
-  )
+        "DROP TABLE chunks",
+    )
 ]

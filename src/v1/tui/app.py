@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 import sys
 import termios
-import tty
 import textwrap
+import tty
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from rich.align import Align
 from rich.box import ROUNDED
@@ -271,7 +272,9 @@ class AppState:
     def _prepare_picker(self) -> None:
         role = "embed" if self.action == Action.INGEST else "chat"
         preferred = (
-            self.preferred_embed if self.action == Action.INGEST else self.preferred_chat
+            self.preferred_embed
+            if self.action == Action.INGEST
+            else self.preferred_chat
         )
         self.model_items = models_for_role(self.models, role)
         self.model_cursor = index_of(self.model_items, preferred)
@@ -622,7 +625,7 @@ def render_header(width: int) -> Panel:
 def render_compact_header(feature: str) -> Padding:
     row = Text()
     row.append("LAZYDOCS", style=f"bold {LIME}")
-    row.append("  ›  ", style=MUTED)
+    row.append("  ›  ", style=MUTED)  # noqa: RUF001
     row.append(feature, style=f"bold {CYAN}")
     return Padding(row, (1, 2, 0, 2))
 
@@ -677,7 +680,9 @@ def _render_home(state: AppState, width: int) -> Group:
         if cards:
             cards.append(Text(""))
         cards.append(
-            _action_card(option, selected=index == state.action_cursor, width=card_width)
+            _action_card(
+                option, selected=index == state.action_cursor, width=card_width
+            )
         )
 
     heading: list = []
@@ -870,7 +875,9 @@ def _file_picker(state: AppState, height: int) -> Padding:
     if start > 0:
         list_rows.append(Text(f"  ↑ {start} above", style=MUTED))
     for index in range(start, end):
-        list_rows.append(_choice_row(items[index], selected=index == state.files_cursor))
+        list_rows.append(
+            _choice_row(items[index], selected=index == state.files_cursor)
+        )
     remaining = len(items) - end
     if remaining > 0:
         list_rows.append(Text(f"  ↓ {remaining} below", style=MUTED))
@@ -965,7 +972,7 @@ def _visible_transcript(
 def _prompt_row(state: AppState) -> Text:
     if state.step == Step.THINKING:
         return Text("  ⋯  thinking…", style=MUTED)
-    row = Text("  ›  ", style=f"bold {LIME}")
+    row = Text("  ›  ", style=f"bold {LIME}")  # noqa: RUF001
     row.append(state.draft, style=TEAL)
     row.append("▌", style=CYAN)
     return row

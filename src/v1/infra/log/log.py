@@ -1,18 +1,20 @@
-import structlog
 import logging
 from pathlib import Path
 
-def configure_logging(path: Path) -> None:
-  path.parent.mkdir(parents=True, exist_ok=True)
+import structlog
 
-  structlog.configure(
-    processors=[
-      structlog.processors.add_log_level,
-      structlog.processors.TimeStamper(fmt="iso"),
-      structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-    logger_factory=structlog.WriteLoggerFactory(
-      file=path.open("a", encoding="utf-8")
+
+def configure_logging(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    structlog.configure(
+        processors=[
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        logger_factory=structlog.WriteLoggerFactory(
+            file=path.open("a", encoding="utf-8")
+        ),
     )
-  )

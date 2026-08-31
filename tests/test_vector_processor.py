@@ -9,7 +9,7 @@ from v1.app.ingestion.vector.processor import VectorProcessor
 from v1.app.ingestion.vector.schemas import Chunk, ProcessedDocument
 from v1.app.ingestion.vector.settings import RuntimeSettings, VectorSettings
 
-LONG_TEXT = ("alpha beta gamma delta epsilon zeta eta theta. " * 20)
+LONG_TEXT = "alpha beta gamma delta epsilon zeta eta theta. " * 20
 
 
 class ScriptedEmbeddings(Embeddings):
@@ -109,7 +109,7 @@ async def test_process_raises_when_retries_are_exhausted():
     embeddings = ScriptedEmbeddings(script=["fail", "fail", "fail"])
     processor = make_processor(embeddings, max_attempts=2)
 
-    with pytest.raises(EmbeddingError, match="fail.txt"):
+    with pytest.raises(EmbeddingError, match=r"fail\.txt"):
         await processor.process(
             Document(page_content="always fail", metadata={"source": "fail.txt"})
         )

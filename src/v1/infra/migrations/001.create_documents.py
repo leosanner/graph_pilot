@@ -3,8 +3,8 @@ from yoyo import step
 __depends__ = {}
 
 steps = [
-  step(
-    """
+    step(
+        """
     CREATE TABLE documents (
       id UUID PRIMARY KEY,
       name TEXT NOT NULL,
@@ -12,6 +12,6 @@ steps = [
       updated_at TIMESTAMPTZ
     )
     """,
-    "DROP TABLE documents",
-  )
+        "DROP TABLE documents",
+    )
 ]

@@ -50,9 +50,7 @@ def list_browse_entries(directory: Path) -> list[BrowseEntry]:
         ),
         key=lambda item: item.name.lower(),
     )
-    entries.extend(
-        BrowseEntry(BrowseKind.DIR, item.name, item) for item in children
-    )
+    entries.extend(BrowseEntry(BrowseKind.DIR, item.name, item) for item in children)
     return entries
 
 

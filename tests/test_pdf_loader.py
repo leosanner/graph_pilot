@@ -87,5 +87,5 @@ def test_document_from_path_rejects_missing_file(tmp_path: Path):
 def test_document_from_path_rejects_non_pdf(tmp_path: Path):
     path = tmp_path / "notes.txt"
     path.write_text("hello")
-    with pytest.raises(typer.BadParameter, match="not a .pdf file"):
+    with pytest.raises(typer.BadParameter, match=r"not a \.pdf file"):
         document_from_path(path)

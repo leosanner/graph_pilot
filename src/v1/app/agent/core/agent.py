@@ -13,42 +13,42 @@ from v1.app.agent.rag.tool import Config, make_search_tool
 
 @dataclass
 class AgentRetrievalConfig:
-  retrieval: Retrieval
-  embeddings: Embeddings
-  config: Config
+    retrieval: Retrieval
+    embeddings: Embeddings
+    config: Config
 
 
 class Agent:
-  def __init__(
-    self,
-    modelSettings: ModelSettings,
-    retrievalConfig: AgentRetrievalConfig,
-  ):
-    self.search_tool = make_search_tool(
-      retrievalConfig.retrieval,
-      retrievalConfig.embeddings,
-      retrievalConfig.config,
-    )
-    model = new_chat_model(modelSettings)
-    call_model = make_call_model(model, self.search_tool)
-    self.graph = build_graph(call_model, self.search_tool)
-    self.messages = []
+    def __init__(
+        self,
+        modelSettings: ModelSettings,
+        retrievalConfig: AgentRetrievalConfig,
+    ):
+        self.search_tool = make_search_tool(
+            retrievalConfig.retrieval,
+            retrievalConfig.embeddings,
+            retrievalConfig.config,
+        )
+        model = new_chat_model(modelSettings)
+        call_model = make_call_model(model, self.search_tool)
+        self.graph = build_graph(call_model, self.search_tool)
+        self.messages = []
 
-  def invoke(self, message: str) -> str:
-    result = self.graph.invoke(self._input(message))
-    return self._commit(result)
+    def invoke(self, message: str) -> str:
+        result = self.graph.invoke(self._input(message))
+        return self._commit(result)
 
-  async def ainvoke(self, message: str) -> str:
-    result = await self.graph.ainvoke(self._input(message))
-    return self._commit(result)
+    async def ainvoke(self, message: str) -> str:
+        result = await self.graph.ainvoke(self._input(message))
+        return self._commit(result)
 
-  def reset(self) -> None:
-    self.messages = []
+    def reset(self) -> None:
+        self.messages = []
 
-  def _input(self, message: str) -> InputState:
-    return {"messages": [*self.messages, HumanMessage(content=message)]}
+    def _input(self, message: str) -> InputState:
+        return {"messages": [*self.messages, HumanMessage(content=message)]}
 
-  def _commit(self, result: State) -> str:
-    self.messages = list(result["messages"])
-    content = result["messages"][-1].content
-    return content if isinstance(content, str) else str(content)
+    def _commit(self, result: State) -> str:
+        self.messages = list(result["messages"])
+        content = result["messages"][-1].content
+        return content if isinstance(content, str) else str(content)

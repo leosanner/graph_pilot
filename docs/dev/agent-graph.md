@@ -57,7 +57,7 @@ graph TD;
 Regenerate with:
 
 ```python
-print(graph.get_graph().draw_ascii())       # needs grandalf
+print(graph.get_graph().draw_ascii())  # needs grandalf
 print(graph.get_graph().draw_mermaid())
 graph.get_graph().draw_mermaid_png(output_file_path="docs/dev/agent-graph.png")
 ```

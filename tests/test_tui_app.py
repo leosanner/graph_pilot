@@ -11,8 +11,12 @@ def _models() -> list[LocalModel]:
     return [
         LocalModel(name="nomic-embed-text:latest", role="embed", family="bert"),
         LocalModel(name="bge-m3:latest", role="embed", family="bert"),
-        LocalModel(name="llama3.1:8b", role="chat", family="llama", parameter_size="8.0B"),
-        LocalModel(name="qwen2.5:7b", role="chat", family="qwen", parameter_size="7.6B"),
+        LocalModel(
+            name="llama3.1:8b", role="chat", family="llama", parameter_size="8.0B"
+        ),
+        LocalModel(
+            name="qwen2.5:7b", role="chat", family="qwen", parameter_size="7.6B"
+        ),
     ]
 
 
@@ -85,7 +89,9 @@ def test_home_opens_chat_then_picks_a_chat_model():
 
 
 class FakeSession:
-    def __init__(self, reply: str = "42 pages, all of them dull.", error: Exception | None = None):
+    def __init__(
+        self, reply: str = "42 pages, all of them dull.", error: Exception | None = None
+    ):
         self.reply = reply
         self.error = error
         self.asked: list[str] = []
