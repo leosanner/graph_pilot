@@ -5,7 +5,7 @@ export
 # only, so migrations run through the `postgresql+psycopg://` scheme.
 YOYO_DATABASE_URL := postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)
 
-.PHONY: up db-up db-down db-reset db-logs db-shell migrate rollback
+.PHONY: up db-up db-down db-reset db-logs db-shell migrate rollback lint format
 
 up:
 	./scripts/up.sh
@@ -32,3 +32,11 @@ migrate:
 
 rollback:
 	yoyo rollback --database "$(YOYO_DATABASE_URL)"
+
+lint:
+	uv run ruff check .
+	uv run ruff format --check .
+
+format:
+	uv run ruff format .
+	uv run ruff check --fix .
