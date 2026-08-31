@@ -1,6 +1,6 @@
 # Model metadata
 
-Code: `src/v1/app/ingestion/vector/utils/utils.py` → `load_model_information`.
+Code: `src/v1/app/ingestion/vector/utils/utils.py` → `load_model_metadata`.
 
 ## Why it exists
 
@@ -16,7 +16,7 @@ It does **not** pick chunk size or overlap. Those are a policy on top of this me
 
 ```mermaid
 flowchart LR
-  A["model_name"] --> B["load_model_information"]
+  A["model_name"] --> B["load_model_metadata"]
   B --> C["Ollama show"]
   C --> D["model_info"]
   D --> E["pick *.context_length<br/>and *.embedding_length"]
@@ -41,9 +41,9 @@ If the show call fails, or those two fields are missing, it raises `ModelInfoErr
 
 ```json
 {
-  "model_name": "nomic-embed-text",
   "context_length": 2048,
-  "embedding_dim": 768
+  "embedding_dim": 768,
+  "capabilites": []
 }
 ```
 
