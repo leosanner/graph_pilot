@@ -14,7 +14,7 @@ class LogLevel(IntEnum):
 @dataclass
 class LogConfig:
     path: Path
-    log_level: LogLevel= field(default=logging.NOTSET)
+    log_level: LogLevel= field(default=logging.INFO)
 
 
 def configure_logging(config: LogConfig) -> None:
