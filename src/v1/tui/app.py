@@ -660,7 +660,7 @@ def render(state: AppState, width: int, height: int) -> Group:
     elif state.step in {Step.CHAT, Step.THINKING}:
         parts.append(_chat_body(state, width, height))
         if state.step == Step.THINKING:
-            parts.append(_help("searching your documents…"))
+            parts.append(_help("thinking…"))
         else:
             parts.append(_help("↑↓ scroll  •  enter send  •  esc home  •  ctrl+c quit"))
     elif state.step == Step.READY:

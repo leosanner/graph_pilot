@@ -19,11 +19,11 @@ def make_search_tool(retrieval: Retrieval, embeddings: Embeddings, config: Confi
     def search_tool(query: str) -> tuple[str, list[QueryResult]]:
         """Retrieve passages from the local ingested document collection.
 
-        Use this whenever the answer may be in the user's PDFs or other
-        ingested files. Search is semantic similarity over document chunks,
-        not keyword matching, not SQL, and not the web. Call it before
-        answering factual questions about that corpus; do not call it for
-        small talk or for questions that only need the conversation so far.
+        Do not call this for greetings, thanks, small talk, or anything
+        answerable from the conversation so far. Call it only for factual
+        questions that may be in the user's PDFs. Search is semantic
+        similarity over document chunks, not keyword matching, not SQL,
+        and not the web.
 
         Args:
             query: A standalone natural-language search query. Restate the
