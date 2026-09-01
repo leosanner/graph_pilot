@@ -288,6 +288,7 @@ def test_chat_render_shows_a_thinking_hint_while_the_agent_runs():
 
     assert "thinking" in text
     assert "why?" in text
+    assert text.lower().count("thinking") == 1
 
 
 def _shown(state: AppState, *, width: int = 80, height: int = 24) -> str:

@@ -659,10 +659,15 @@ def render(state: AppState, width: int, height: int) -> Group:
         parts.append(_help("please wait"))
     elif state.step in {Step.CHAT, Step.THINKING}:
         parts.append(_chat_body(state, width, height))
-        if state.step == Step.THINKING:
-            parts.append(_help("thinking…"))
-        else:
-            parts.append(_help("↑↓ scroll  •  enter send  •  esc home  •  ctrl+c quit"))
+        parts.append(
+            Padding(
+                Text(
+                    "↑↓ scroll  •  enter send  •  esc home  •  ctrl+c quit",
+                    style=MUTED,
+                ),
+                (0, 2),
+            )
+        )
     elif state.step == Step.READY:
         parts.append(_ready_body(state))
         if state.action == Action.INGEST:
@@ -921,7 +926,7 @@ def _speaker_style(speaker: Speaker) -> str:
 def _turn_rows(turn: Turn, width: int) -> list[Text]:
     body_style = RED if turn.speaker == Speaker.FAILURE else TEAL
     rows = [Text(turn.speaker, style=_speaker_style(turn.speaker))]
-    for paragraph in turn.text.splitlines() or [""]:
+    for paragraph in turn.text.rstrip().splitlines() or [""]:
         if not paragraph.strip():
             rows.append(Text(""))
             continue
@@ -944,7 +949,11 @@ def _visible_transcript(
 ) -> tuple[list[Text], int]:
     rows = _transcript_rows(turns, width)
     total = len(rows)
-    if not budget or total <= budget:
+    if not budget:
+        return rows, 0
+    if total <= budget:
+        if total < budget:
+            rows = [Text("")] * (budget - total) + rows
         return rows, 0
 
     # Overflowing content needs at least one marker line. At the top or
@@ -978,25 +987,49 @@ def _prompt_row(state: AppState) -> Text:
     return row
 
 
-def _chat_body(state: AppState, width: int, height: int) -> Padding:
-    inner = max(20, width - 12)
-    budget = max(4, height - 13) if height else 0
-    rows, state.chat_scroll = _visible_transcript(
-        state.turns, inner, budget, state.chat_scroll
+_CHAT_HEADER_LINES = 2
+_CHAT_FOOTER_LINES = 1
+_CHAT_PANEL_BORDERS = 2
+_CHAT_PROMPT_LINES = 1
+
+
+def _transcript_budget(height: int) -> int:
+    if not height:
+        return 0
+    chrome = (
+        _CHAT_HEADER_LINES
+        + _CHAT_FOOTER_LINES
+        + _CHAT_PANEL_BORDERS
+        + _CHAT_PROMPT_LINES
     )
-    if not rows:
-        rows = [Text("Ask anything about the documents you ingested.", style=MUTED)]
+    return max(4, height - chrome)
+
+
+def _chat_body(state: AppState, width: int, height: int) -> Padding:
+    inner = max(20, width - 8)
+    budget = _transcript_budget(height)
+    if not state.turns:
+        rows = [
+            Text(
+                "Ask anything about the documents you ingested.",
+                style=MUTED,
+            )
+        ]
+        state.chat_scroll = 0
+        if budget > 1:
+            rows = [Text("")] * (budget - 1) + rows
+    else:
+        rows, state.chat_scroll = _visible_transcript(
+            state.turns, inner, budget, state.chat_scroll
+        )
     return Padding(
-        Group(
-            Panel(
-                Group(*rows),
-                box=ROUNDED,
-                border_style=MUTED,
-                padding=(1, 2),
-            ),
-            _prompt_row(state),
+        Panel(
+            Group(*rows, _prompt_row(state)),
+            box=ROUNDED,
+            border_style=MUTED,
+            padding=(0, 1),
         ),
-        (1, 2),
+        (0, 2),
     )
 
 
