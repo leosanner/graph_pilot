@@ -25,7 +25,7 @@ A learning project with the full loop wired: **ingest → retrieve → chat**. T
 |---|---|
 | **Ingest** | Split a PDF, embed batches with Ollama, persist document + chunk rows |
 | **Retrieve** | HNSW index on chunk embeddings (cosine) — same model at query time |
-| **Chat** | LangGraph agent calls `search_tool`, then answers from the hits |
+| **Chat** | LangGraph gateway either replies or hands off to `search_tool` |
 
 The TUI lists only `.pdf` files — that is the format the loader supports. Default embed model is `nomic-embed-text` (768-d); another dimension needs a new migration.
 
@@ -55,18 +55,23 @@ flowchart TD
   Home --> Ingest["pick embed model → browse → PDF"]
   Ingest --> Persist["chunks + embeddings in Postgres"]
   Home --> Chat["pick chat model"]
-  Chat --> Loop["model ⇄ search_tool"]
+  Chat --> Loop["gateway → model ⇄ search_tool"]
   Persist -.-> Loop
 ```
 
 <details>
 <summary>Agent loop (compiled graph)</summary>
 
-The chat model either answers or calls `search_tool`. Hits come back as a tool message; the model speaks again until the reply is plain text.
+The gateway either calls `reply_to_user` and ends, or `delegate_to_retrieval` and enters `model` ⇄ `search_tool`.
 
 ```mermaid
 flowchart TD
-  S(["start"]) --> M["model"]
+  S(["start"]) --> G["gateway"]
+  G -.-> GE(["end"])
+  G -.-> GT["gateway_tools"]
+  GT -.-> GE
+  GT -.-> G
+  GT -.-> M["model"]
   M -.-> E(["end"])
   M -.-> T["tools / search_tool"]
   T --> M
@@ -87,7 +92,7 @@ What actually runs today — grouped the way you hit it.
 | **Chunk + embed** | [LangChain](https://python.langchain.com/) splitters + [`langchain-ollama`](https://python.langchain.com/docs/integrations/text_embedding/ollama/) | Recursive split, batched `aembed_documents`, model window probed from Ollama |
 | **Models** | [Ollama](https://ollama.com/) | Embeddings default to `nomic-embed-text`; chat is whatever local model you pick |
 | **Store** | [Postgres 17](https://www.postgresql.org/) + [pgvector](https://github.com/pgvector/pgvector) | `documents` / `chunks` tables; HNSW on `vector(768)` with cosine (`<=>`) |
-| **Agent** | [LangGraph](https://github.com/langchain-ai/langgraph) | `model` ⇄ `tools` until a final `AIMessage` |
+| **Agent** | [LangGraph](https://github.com/langchain-ai/langgraph) | gateway decides; `model` ⇄ `tools` only after handoff |
 | **Runtime** | [uv](https://docs.astral.sh/uv/), Docker Compose, [yoyo](https://ollycope.com/software/yoyo/), [Pydantic](https://docs.pydantic.dev/) | One `make up` for deps, database, migrations, and the embed model |
 | **Quality** | [pytest](https://docs.pytest.org/) + [Ruff](https://docs.astral.sh/ruff/) | Tests under `tests/`; `make lint` / `make format` |
 
@@ -137,7 +142,7 @@ src/v1/
 ├── tui/                    Rich screens: home, file picker, chat
 ├── app/
 │   ├── ingestion/          PDF load → split → embed → persist
-│   └── agent/              LangGraph, retrieval, search_tool
+│   └── agent/              LangGraph gateway, retrieval, search_tool
 └── infra/                  Postgres client + yoyo migrations
 docs/dev/                   why / what / mermaid / example JSON per module
 tests/

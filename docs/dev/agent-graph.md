@@ -4,7 +4,7 @@ Code: `src/v1/app/agent/core/graph.py` → `build_graph`. A turn is `Agent.invok
 
 ## Why it exists
 
-A chat model cannot search the ingested PDFs by itself. It either answers from memory or it emits a tool call. The graph is the loop that runs that choice: call the model, maybe run `search_tool`, call the model again, until the reply is plain text.
+A chat model cannot search the ingested PDFs by itself, and it should not treat every message as a retrieval problem. The graph is the control flow that makes that split: a **gateway** decides whether to answer now or hand off, and a **retrieval loop** (`model` ⇄ `search_tool`) only runs when the question may be in the corpus.
 
 This is not the HNSW index. That graph lives in Postgres and finds nearby chunks. This one is control flow.
 
@@ -12,7 +12,9 @@ This is not the HNSW index. That graph lives in Postgres and finds nearby chunks
 
 One user message in, one assistant reply out. `InputState` is the new messages; `State` is the full list with `add_messages`, so each node appends instead of replacing history.
 
-It does **not** embed the question (the tool does that), talk to Postgres directly, pick the Ollama model, or persist a thread. `Agent` keeps `messages` on the instance between `invoke` calls. There is no checkpointer yet.
+It does **not** embed the question (the retrieval tool does that), talk to Postgres directly, pick the Ollama model, or persist a thread. `Agent` keeps `messages` on the instance between `invoke` calls. There is no checkpointer yet.
+
+The gateway and the retrieval model share history but not a system prompt: each `model_factory` prepends its own prompt for that call and does not write it back into state.
 
 ## How it works
 
@@ -20,19 +22,30 @@ Happy path when the answer is in the corpus:
 
 ```mermaid
 flowchart TD
-  A["HumanMessage"] --> B["model"]
-  B -->|"tool_calls"| C["tools / search_tool"]
-  C --> B
-  B -->|"text, no tool_calls"| D["AIMessage"]
+  A["HumanMessage"] --> B["gateway"]
+  B -->|"delegate_to_retrieval"| C["gateway_tools"]
+  C --> D["model"]
+  D -->|"tool_calls"| E["tools / search_tool"]
+  E --> D
+  D -->|"text, no tool_calls"| F["AIMessage"]
 ```
 
-`__start__` always enters `model`. `call_model` sends `state["messages"]` to the chat model with `search_tool` bound. The model either returns `tool_calls` or a final `AIMessage`.
+Small talk never leaves the gateway:
 
-`tools_condition` reads the last message: `tool_calls` present → `tools`; otherwise → `__end__`. `ToolNode` runs `search_tool` (embed query, HNSW lookup) and appends `ToolMessage`s. The solid edge `tools → model` is the cycle.
+```mermaid
+flowchart TD
+  A["HumanMessage"] --> B["gateway"]
+  B -->|"reply_to_user"| C["gateway_tools"]
+  C --> D["ToolMessage reply"]
+```
 
-Small talk never visits `tools`. A retry after zero hits is a second lap around the same cycle. `recursion_limit` (LangGraph default 25) is the backstop if the model never stops calling the tool.
+`__start__` always enters `gateway`. That node is bound to `reply_to_user` and `delegate_to_retrieval`. `tools_condition` sends tool calls to `gateway_tools` and plain text to `__end__`.
 
-The figures below are the **compiled** graph, from `graph.get_graph()` — the same object `build_graph` returns. Dotted edges are conditional (`tools_condition`). Solid edges always fire.
+`gateway_tools_condition` reads the trailing `ToolMessage`s: `delegate_to_retrieval` → `model`; `reply_to_user` → `__end__`; any other gateway tool loops back to `gateway`. Extra eval tools can be added later without changing the retrieval subgraph.
+
+`model` is bound only to `search_tool`. Same `tools_condition` as before: tool calls → `tools`; otherwise `__end__`. The solid edge `tools → model` is the retrieval cycle. `recursion_limit` (LangGraph default 25) is the backstop if the model never stops calling the tool.
+
+The figures below are the **compiled** graph, from `graph.get_graph()` — the same object `build_graph` returns. Dotted edges are conditional. Solid edges always fire.
 
 ```mermaid
 ---
@@ -42,10 +55,17 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
+	gateway(gateway)
+	gateway_tools(gateway_tools)
 	model(model)
 	tools(tools)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> model;
+	__start__ --> gateway;
+	gateway -.-> __end__;
+	gateway -. &nbsp;tools&nbsp; .-> gateway_tools;
+	gateway_tools -.-> __end__;
+	gateway_tools -.-> gateway;
+	gateway_tools -.-> model;
 	model -.-> __end__;
 	model -.-> tools;
 	tools --> model;
@@ -84,6 +104,18 @@ graph.get_graph().draw_mermaid_png(output_file_path="docs/dev/agent-graph.png")
       "type": "ai",
       "content": "",
       "tool_calls": [
+        { "name": "delegate_to_retrieval", "args": {} }
+      ]
+    },
+    {
+      "type": "tool",
+      "name": "delegate_to_retrieval",
+      "content": "Continuing with document retrieval."
+    },
+    {
+      "type": "ai",
+      "content": "",
+      "tool_calls": [
         { "name": "search_tool", "args": { "query": "notice period" } }
       ]
     },
@@ -100,4 +132,4 @@ graph.get_graph().draw_mermaid_png(output_file_path="docs/dev/agent-graph.png")
 }
 ```
 
-`Agent.invoke` returns only that last `content` string. The tool `content` is what the model reads on the second `model` visit; `QueryResult` artifacts stay in the `ToolMessage`, not in this JSON shape.
+`Agent.invoke` returns only that last `content` string. For a direct reply the last message is the `reply_to_user` `ToolMessage`. For a corpus question it is the final `AIMessage` from `model`. `QueryResult` artifacts stay in the `search_tool` `ToolMessage`, not in this JSON shape.
